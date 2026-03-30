@@ -115,6 +115,7 @@ class AdaptiveSphereModel(nn.Module):
         # 类别权重原型 (在超球面上)
         self.weight_prototypes = nn.Parameter(torch.randn(num_classes, hidden_dim))
         self.margin_matrix = torch.zeros(num_classes, num_classes, device=DEVICE)
+        self.kappa_values = torch.zeros(self.num_classes, hidden_dim, device=DEVICE)
 
         # 初始化权重原型
         self._init_prototypes()
@@ -141,20 +142,29 @@ class AdaptiveSphereModel(nn.Module):
 
         return normalized_features, normalized_prototypes
 
-    def compute_kappa(self, prototypes):
-        """计算每个类别的vMF分布Kappa值"""
-        # prototypes: [num_classes, hidden_dim], 已归一化
-        # 使用闭式近似计算kappa
-        proto_norms = torch.norm(prototypes, p=2, dim=1)  # 应该接近1
-
-        # kappa估计公式
+    def compute_kappa(self, features, labels):
+        """计算每个类别的vMF分布Kappa值 (使用样本到类原型的平均cosine)"""
+        num_classes = self.num_classes
         d = self.hidden_dim
-        kappa = (proto_norms * (d - proto_norms**2)) / (1 - proto_norms**2 + 1e-8)
+        kappa_values = torch.zeros(num_classes, device=features.device)
 
-        # 确保kappa为正
-        kappa = torch.clamp(kappa, min=1.0)
+        for y in range(num_classes):
+            mask = labels == y
+            class_features = features[mask]  # [num_class_samples, dim]
+            if len(class_features) < 2:
+                kappa_values[y] = d * 0.5  # 默认中等值
+                continue
+            # 类原型
+            prototype = F.normalize(class_features.mean(dim=0, keepdim=True), dim=1)
+            # 平均余弦相似度 r
+            cos_sims = torch.matmul(class_features, prototype.T).squeeze(1)
+            r = cos_sims.mean().item()
+            r = min(r, 0.95)  # clamp 防止爆炸
+            kappa = (d * r - r**3) / (1 - r**2 + 1e-6)
+            kappa = max(1.0, min(1000.0, kappa))  # clip上下界
+            kappa_values[y] = kappa
 
-        return kappa
+        self.kappa_values = kappa_values
 
     def compute_adaptive_margin(self, kappa_i, kappa_j):
         """计算两个类别之间的自适应margin"""
@@ -172,11 +182,11 @@ class AdaptiveSphereModel(nn.Module):
 
         return margin
 
-    def compute_loss(self, features, prototypes, labels, kappa_values):
+    def compute_loss(self, features, prototypes, labels):
         """计算自适应球面损失"""
         batch_size = features.size(0)
         num_classes = self.num_classes
-
+        self.compute_kappa(features,labels)
         # 计算余弦相似度矩阵
         # features: [batch, dim], prototypes: [num_classes, dim]
         cosine_sim = torch.matmul(features, prototypes.T)  # [batch, num_classes]
@@ -188,7 +198,7 @@ class AdaptiveSphereModel(nn.Module):
             for j in range(num_classes):
                 if i != j:
                     margin = self.compute_adaptive_margin(
-                        kappa_values[i].item(), kappa_values[j].item()
+                        self.kappa_values[i].item(), self.kappa_values[j].item()
                     )
                     self.margin_matrix[i, j] = margin
 
@@ -289,8 +299,8 @@ def compute_metrics_positive_macro(y_true, y_pred, all_classes):
         }
 
     macro_mcc = sum(class_metrics[c]["mcc"] for c in positive_classes) / len(
-            positive_classes
-        )
+        positive_classes
+    )
     macro_f1 = sum(class_metrics[c]["f1"] for c in positive_classes) / len(
         positive_classes
     )
@@ -592,29 +602,23 @@ def main():
         for batch in train_pbar:
             input_ids = batch["input_ids"].to(DEVICE)
             attention_mask = batch["attention_mask"].to(DEVICE)
-            labels = batch["label_idx"].to(DEVICE)
-            label_names = batch["label"]
-
+            labels = batch["label_idx"].to(DEVICE)  # GPU tensor
+        
             optimizer.zero_grad()
-
+        
             with autocast():
                 features, prototypes = model(input_ids, attention_mask)
-
-                # 计算kappa值
-                kappa_values = model.compute_kappa(prototypes)
-
-                # 计算损失
-                loss = model.compute_loss(
-                    features, prototypes, labels.cpu().numpy().tolist(), kappa_values
-                )
-
+        
+                # 如果 prototypes 是 batch 内输出，最好 κ 用全局/EMA
+                loss = model.compute_loss(features, prototypes, labels)
+        
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-
+        
             train_loss += loss.item()
             num_batches += 1
-
+        
             train_pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         avg_train_loss = train_loss / num_batches
@@ -642,13 +646,10 @@ def main():
                 with autocast():
                     features, prototypes = model(input_ids, attention_mask)
 
-                    kappa_values = model.compute_kappa(prototypes)
-
                     loss = model.compute_loss(
                         features,
                         prototypes,
                         labels.cpu().numpy().tolist(),
-                        kappa_values,
                     )
 
                 val_loss += loss.item()
@@ -812,6 +813,7 @@ def main():
                     MARGIN_HEATMAP_OUTPUT_DIR, f"margin_heatmap_epoch_{epoch+1}.svg"
                 ),
             )
+        kappas = model.kappa_values.detach()
 
         # 3. UMAP/t-SNE图
         all_features_concat = torch.cat(all_features, dim=0)
@@ -828,6 +830,7 @@ def main():
         print(
             f"Epoch {epoch+1}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}"
         )
+        print(f"Kappas: {kappas}")
         print(
             f"Binary F1: {binary_metrics['f1']:.4f}, MCC: {binary_metrics['mcc']:.4f}"
         )
