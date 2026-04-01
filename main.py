@@ -81,10 +81,10 @@ def compute_adaptive_margin(kappa_i, kappa_j, alpha=CONFIDENCE_ALPHA):
     kappa_i, kappa_j: 标量或张量
     """
     # 反误差函数 erf^{-1}(alpha)
-    erf_inv_alpha = erfinv(2 * alpha - 1) * torch.sqrt(2)  # 调整scipy的erfinv定义
+    erf_inv_alpha = erfinv(2 * alpha - 1) * math.sqrt(2)  # 调整scipy的erfinv定义
 
-    term_i = torch.sqrt(2.0 / kappa_i) * erf_inv_alpha
-    term_j = torch.sqrt(2.0 / kappa_j) * erf_inv_alpha
+    term_i = math.sqrt(2.0 / kappa_i) * erf_inv_alpha
+    term_j = math.sqrt(2.0 / kappa_j) * erf_inv_alpha
 
     return 0.5 * (term_i + term_j)
 
