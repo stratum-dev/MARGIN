@@ -1,3 +1,6 @@
 outputs
 output
+
+*.temp.py
+
 __pycache__

@@ -1,8 +1,18 @@
+from datetime import datetime
 import os
 import json
 import math
 import warnings
 import numpy as np
+from scipy.stats import chi2
+from sklearn.metrics import (
+    confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    accuracy_score,
+)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,9 +23,11 @@ from datasets import load_dataset
 from tqdm import tqdm
 from scipy.special import erfinv
 from scipy.optimize import minimize
+from scipy.stats import vonmises_fisher
 import seaborn as sns
 import matplotlib.pyplot as plt
 import umap
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # ==================== 常量配置区 ====================
@@ -29,24 +41,32 @@ MODEL_NAME = "microsoft/graphcodebert-base"
 EMBEDDING_DIM = 768  # graphcodebert-base的维度
 
 # 训练配置
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY = 0.01
 MAX_EPOCHS = 200
-EARLY_STOPPING_PATIENCE = 5
+EARLY_STOPPING_PATIENCE = MAX_EPOCHS
 SCHEDULER_PATIENCE = 3
 
 # ArcFace & 球面配置
 SCALE_FACTOR = 30.0  # s
-CONFIDENCE_ALPHA = 0.9  # α
+CONFIDENCE_ALPHA = 0.95  # α
 MIN_KAPPA = 1.0  # 防止kappa过小导致数值不稳定
 
 # 设备配置
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
+TIME_PREFIX = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 # 输出配置
-OUTPUT_DIR = "./output"
+OUTPUT_DIR = f"./output/{MODEL_NAME.split('/')[1]}-{TIME_PREFIX}"
+UMAP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "umap")
+PROTOTYPE_ALIGNMENT_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "prototype-alignment")
+PROTOTYPE_DISPERSION_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "prototype-dispersion")
+REPORT_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "report")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(UMAP_OUTPUT_DIR, exist_ok=True)
+os.makedirs(PROTOTYPE_ALIGNMENT_OUTPUT_DIR, exist_ok=True)
+os.makedirs(PROTOTYPE_DISPERSION_OUTPUT_DIR, exist_ok=True)
+os.makedirs(REPORT_OUTPUT_DIR, exist_ok=True)
 
 # UMAP配置
 UMAP_N_NEIGHBORS = 15
@@ -58,35 +78,30 @@ GEOMEDIAN_TOL = 1e-5
 
 
 # ==================== 工具函数 ====================
-def compute_vmf_kappa(mean_resultant_length, dim):
-    """
-    计算vMF分布的kappa参数 (MLE近似)
-    mean_resultant_length: ||r_bar||, 必须在[0,1]之间
-    dim: 维度d
-    """
-    r = mean_resultant_length
-    # 防止数值问题
-    r = torch.clamp(r, 0.0, 0.9999)
-
-    numerator = r * (dim - r**2)
-    denominator = 1 - r**2
-
-    kappa = numerator / denominator
-    return torch.clamp(kappa, min=MIN_KAPPA)
+def compute_vmf_kappa(r, d):
+    r = float(r)
+    r = min(max(r, 1e-6), 1 - 1e-8)
+    print("resultant:", r)
+    if r > 0.9:
+        return (d - 1) / (2 * (1 - r))
+    elif r > 0.5:
+        return r * (d - r**2) / (1 - r**2)
+    else:
+        return d * r
 
 
-def compute_adaptive_margin(kappa_i, kappa_j, alpha=CONFIDENCE_ALPHA):
+def compute_pairwise_margin(kappa_i, kappa_j, dim, alpha=0.95):
     """
     计算两个类别之间的自适应margin Δm_{i,j}
-    kappa_i, kappa_j: 标量或张量
+    返回弧度值
     """
-    # 反误差函数 erf^{-1}(alpha)
-    erf_inv_alpha = erfinv(2 * alpha - 1) * math.sqrt(2)  # 调整scipy的erfinv定义
-
-    term_i = math.sqrt(2.0 / kappa_i) * erf_inv_alpha
-    term_j = math.sqrt(2.0 / kappa_j) * erf_inv_alpha
-
-    return 0.5 * (term_i + term_j)
+    term_i = math.sqrt(1 / kappa_i)
+    term_j = math.sqrt(1 / kappa_j)
+    
+    q = chi2.ppf(alpha, df=dim)
+    sqrt_q = math.sqrt(q)  # 关键修正！
+    
+    return 0.5 * sqrt_q * (term_i + term_j)  # 返回弧度
 
 
 def compute_geometric_median(
@@ -269,103 +284,225 @@ class AdaptiveArcFaceLoss(nn.Module):
 
 
 # ==================== 评估指标计算 ====================
-def compute_metrics(y_true, y_pred, labels):
+# import numpy as np
+from sklearn.metrics import (
+    confusion_matrix,
+    matthews_corrcoef,
+    f1_score,
+    precision_score,
+    recall_score,
+    accuracy_score,
+)
+
+
+def compute_metrics(truth_label_idx, pred_label_idx, idx2label: dict):
     """
     计算各类评估指标
-    labels: 所有类别ID列表
-    返回: metrics字典
+    假设：idx2label 中索引 0 为 'Non-vul' (负例)，其余为正例
+    返回：包含 global_macro, positive_macro, binary 及各类别详细 TP/FP/TN/FN 的 metrics 字典
     """
-    from sklearn.metrics import (
-        confusion_matrix,
-        matthews_corrcoef,
-        f1_score,
-        precision_score,
-        recall_score,
-        accuracy_score,
-    )
-
+    all_label_idx = list(range(len(idx2label)))
     metrics = {}
 
-    # 全局Macro指标
-    metrics["global_macro"] = {
-        "mcc": matthews_corrcoef(y_true, y_pred),
-        "f1": f1_score(y_true, y_pred, average="macro", labels=labels),
-        "precision": precision_score(
-            y_true, y_pred, average="macro", labels=labels, zero_division=0
-        ),
-        "recall": recall_score(
-            y_true, y_pred, average="macro", labels=labels, zero_division=0
-        ),
-        "accuracy": accuracy_score(y_true, y_pred),
-    }
+    # 1. 计算全局混淆矩阵 (用于后续所有 TP/FP/TN/FN 的计算)
+    cm = confusion_matrix(truth_label_idx, pred_label_idx, labels=all_label_idx)
 
-    # 计算混淆矩阵用于FNR/FPR
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
-
-    # 计算每个类别的FNR和FPR
-    fnr_list = []
-    fpr_list = []
-    for i in range(len(labels)):
-        tp = cm[i, i]
-        fn = np.sum(cm[i, :]) - tp
-        fp = np.sum(cm[:, i]) - tp
+    # 辅助函数：根据多分类混淆矩阵计算特定类别的 TP, FP, TN, FN
+    def get_class_confusion_values(cm, class_idx):
+        tp = cm[class_idx, class_idx]
+        fn = np.sum(cm[class_idx, :]) - tp  # 真实为该类别，但预测为其他
+        fp = np.sum(cm[:, class_idx]) - tp  # 预测为该类别，但真实为其他
         tn = np.sum(cm) - tp - fn - fp
+        return int(tp), int(fp), int(tn), int(fn)
 
-        fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
-        fnr_list.append(fnr)
-        fpr_list.append(fpr)
-
-    metrics["global_macro"]["fnr"] = np.mean(fnr_list)
-    metrics["global_macro"]["fpr"] = np.mean(fpr_list)
-
-    # Positive-Macro指标 (排除Non-vul，假设Non-vul索引为0)
-    positive_labels = [l for l in labels if l != 0]  # 假设0是Non-vul
-    if len(positive_labels) > 0:
-        metrics["positive_macro"] = {
-            "mcc": matthews_corrcoef(
-                [1 if y in positive_labels else 0 for y in y_true],
-                [1 if y in positive_labels else 0 for y in y_pred],
-            ),
-            "f1": f1_score(y_true, y_pred, average="macro", labels=positive_labels),
-            "precision": precision_score(
-                y_true, y_pred, average="macro", labels=positive_labels, zero_division=0
-            ),
-            "recall": recall_score(
-                y_true, y_pred, average="macro", labels=positive_labels, zero_division=0
+    # 辅助函数：计算二值化标签的指标
+    def compute_binary_metrics(y_true_binary, y_pred_binary):
+        return {
+            "f1": f1_score(y_true_binary, y_pred_binary, zero_division=0),
+            "precision": precision_score(y_true_binary, y_pred_binary, zero_division=0),
+            "recall": recall_score(y_true_binary, y_pred_binary, zero_division=0),
+            "mcc": (
+                matthews_corrcoef(y_true_binary, y_pred_binary)
+                if sum(y_true_binary) > 0
+                else 0.0
             ),
         }
 
-        # 每个正例类别的详细指标
-        metrics["positive_macro"]["per_class"] = {}
-        for label in positive_labels:
-            y_true_binary = [1 if y == label else 0 for y in y_true]
-            y_pred_binary = [1 if y == label else 0 for y in y_pred]
+    # =========================================================================
+    # 2. Global Macro (所有类别的平均指标 + 每个类别的详细计数)
+    # =========================================================================
+    metrics["global_macro"] = {
+        "mcc": matthews_corrcoef(truth_label_idx, pred_label_idx),
+        "f1": f1_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=all_label_idx,
+            zero_division=0,
+        ),
+        "precision": precision_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=all_label_idx,
+            zero_division=0,
+        ),
+        "recall": recall_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=all_label_idx,
+            zero_division=0,
+        ),
+        "accuracy": accuracy_score(truth_label_idx, pred_label_idx),
+        "per_class": {},  # 初始化每个类别的详情
+    }
 
-            support = sum(y_true_binary)
+    # 计算全局的 FNR/FPR 平均值
+    fnr_list = []
+    fpr_list = []
+
+    for label_idx in all_label_idx:
+        tp, fp, tn, fn = get_class_confusion_values(cm, label_idx)
+        label_name = idx2label[label_idx]
+
+        # 计算当前类的 FNR/FPR
+        fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        fnr_list.append(fnr)
+        fpr_list.append(fpr)
+
+        # 【关键修复】先将标签二值化，再计算指标
+        y_true_binary = [1 if y == label_idx else 0 for y in truth_label_idx]
+        y_pred_binary = [1 if y == label_idx else 0 for y in pred_label_idx]
+
+        support = tp + fn
+        binary_metrics = (
+            compute_binary_metrics(y_true_binary, y_pred_binary)
+            if support > 0
+            else {"f1": 0.0, "precision": 0.0, "recall": 0.0, "mcc": 0.0}
+        )
+
+        # 保存每个类别的详细指标和计数
+        metrics["global_macro"]["per_class"][label_name] = {
+            "tp": tp,
+            "fp": fp,
+            "tn": tn,
+            "fn": fn,
+            "support": int(support),
+            **binary_metrics,
+        }
+
+    metrics["global_macro"]["fnr"] = float(np.mean(fnr_list))
+    metrics["global_macro"]["fpr"] = float(np.mean(fpr_list))
+
+    # =========================================================================
+    # 3. Positive Macro (排除 Non-vul，假设索引 0 为负例)
+    # =========================================================================
+    positive_label_idx = [l for l in all_label_idx if l != 0]
+
+    # 初始化 positive_macro 字典，防止后续赋值报错
+    metrics["positive_macro"] = {"per_class": {}}
+
+    if len(positive_label_idx) > 0:
+        # 计算 Positive 集合的平均指标
+        y_true_pos = [1 if y in positive_label_idx else 0 for y in truth_label_idx]
+        y_pred_pos = [1 if y in positive_label_idx else 0 for y in pred_label_idx]
+
+        metrics["positive_macro"]["mcc"] = matthews_corrcoef(y_true_pos, y_pred_pos)
+        metrics["positive_macro"]["f1"] = f1_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=positive_label_idx,
+            zero_division=0,
+        )
+        metrics["positive_macro"]["precision"] = precision_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=positive_label_idx,
+            zero_division=0,
+        )
+        metrics["positive_macro"]["recall"] = recall_score(
+            truth_label_idx,
+            pred_label_idx,
+            average="macro",
+            labels=positive_label_idx,
+            zero_division=0,
+        )
+
+        # 计算每个正例类别的详细指标 (包含 TP/FP/TN/FN)
+        for label_idx in positive_label_idx:
+            tp, fp, tn, fn = get_class_confusion_values(cm, label_idx)
+            label_name = idx2label[label_idx]
+            support = tp + fn
+
+            # 【关键修复】先将标签二值化，再计算指标
+            y_true_binary = [1 if y == label_idx else 0 for y in truth_label_idx]
+            y_pred_binary = [1 if y == label_idx else 0 for y in pred_label_idx]
+
             if support > 0:
-                metrics["positive_macro"]["per_class"][int(label)] = {
-                    "mcc": matthews_corrcoef(y_true_binary, y_pred_binary),
-                    "f1": f1_score(y_true_binary, y_pred_binary, zero_division=0),
-                    "precision": precision_score(
-                        y_true_binary, y_pred_binary, zero_division=0
-                    ),
-                    "recall": recall_score(
-                        y_true_binary, y_pred_binary, zero_division=0
-                    ),
+                binary_metrics = compute_binary_metrics(y_true_binary, y_pred_binary)
+                metrics["positive_macro"]["per_class"][label_name] = {
+                    "tp": tp,
+                    "fp": fp,
+                    "tn": tn,
+                    "fn": fn,
                     "support": int(support),
+                    **binary_metrics,
                 }
+    else:
+        # 如果没有正例，填充默认值
+        metrics["positive_macro"].update(
+            {"mcc": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+        )
 
-    # Binary指标 (Non-vul vs CWE-*)
-    y_true_binary = [0 if y == 0 else 1 for y in y_true]
-    y_pred_binary = [0 if y == 0 else 1 for y in y_pred]
+    # =========================================================================
+    # 4. Binary 指标 (Non-vul (0) vs CWE-* (Rest))
+    # =========================================================================
+    # 0 为 Negative, 其他为 Positive
+    binary_truth_label_idx = [0 if y == 0 else 1 for y in truth_label_idx]
+    binary_pred_label_idx = [0 if y == 0 else 1 for y in pred_label_idx]
+
+    # 计算二分类的 TP, FP, TN, FN
+    tp_bin = sum(
+        1
+        for t, p in zip(binary_truth_label_idx, binary_pred_label_idx)
+        if t == 1 and p == 1
+    )
+    tn_bin = sum(
+        1
+        for t, p in zip(binary_truth_label_idx, binary_pred_label_idx)
+        if t == 0 and p == 0
+    )
+    fp_bin = sum(
+        1
+        for t, p in zip(binary_truth_label_idx, binary_pred_label_idx)
+        if t == 0 and p == 1
+    )
+    fn_bin = sum(
+        1
+        for t, p in zip(binary_truth_label_idx, binary_pred_label_idx)
+        if t == 1 and p == 0
+    )
 
     metrics["binary"] = {
-        "mcc": matthews_corrcoef(y_true_binary, y_pred_binary),
-        "f1": f1_score(y_true_binary, y_pred_binary, zero_division=0),
-        "precision": precision_score(y_true_binary, y_pred_binary, zero_division=0),
-        "recall": recall_score(y_true_binary, y_pred_binary, zero_division=0),
+        "tp": int(tp_bin),
+        "fp": int(fp_bin),
+        "tn": int(tn_bin),
+        "fn": int(fn_bin),
+        "support_positive": int(tp_bin + fn_bin),
+        "support_negative": int(tn_bin + fp_bin),
+        "mcc": matthews_corrcoef(binary_truth_label_idx, binary_pred_label_idx),
+        "f1": f1_score(binary_truth_label_idx, binary_pred_label_idx, zero_division=0),
+        "precision": precision_score(
+            binary_truth_label_idx, binary_pred_label_idx, zero_division=0
+        ),
+        "recall": recall_score(
+            binary_truth_label_idx, binary_pred_label_idx, zero_division=0
+        ),
+        "accuracy": accuracy_score(binary_truth_label_idx, binary_pred_label_idx),
     }
 
     return metrics
@@ -402,10 +539,8 @@ class Trainer:
     def compute_epoch_kappas(self, dataloader):
         """计算每个类别的kappa值（基于训练集）"""
         self.model.eval()
-
         # 收集每个类别的特征
         class_features = {i: [] for i in range(self.num_classes)}
-
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Computing kappas", leave=False):
                 input_ids = batch["input_ids"].to(DEVICE)
@@ -419,7 +554,6 @@ class Trainer:
                 for i in range(len(labels)):
                     label = labels[i].item()
                     class_features[label].append(features[i].cpu())
-
         # 计算每个类别的均值结果向量长度
         kappas = {}
         for class_idx in range(self.num_classes):
@@ -430,11 +564,10 @@ class Trainer:
                 mean_vec = torch.mean(feats, dim=0)
                 r_bar = torch.norm(mean_vec).item()
                 # 计算kappa
-                kappa = compute_vmf_kappa(torch.tensor(r_bar), EMBEDDING_DIM).item()
+                kappa = compute_vmf_kappa(torch.tensor(r_bar), EMBEDDING_DIM)
                 kappas[class_idx] = kappa
             else:
                 kappas[class_idx] = MIN_KAPPA
-
         return kappas
 
     def compute_adaptive_margins(self, kappas):
@@ -448,17 +581,17 @@ class Trainer:
                     kappa_i = max(kappas[i], MIN_KAPPA)
                     kappa_j = max(kappas[j], MIN_KAPPA)
 
-                    delta_m = compute_adaptive_margin(
-                        kappa_i, kappa_j, CONFIDENCE_ALPHA
+                    delta_m = compute_pairwise_margin(
+                        kappa_i, kappa_j, EMBEDDING_DIM, CONFIDENCE_ALPHA
                     )
                     max_margin = max(max_margin, delta_m)
 
             # 转换角度为弧度（因为ArcFace使用cos，内部使用弧度）
             # 但compute_adaptive_margin返回的已经是角度值，需要转换为弧度
-            margin_rad = max_margin * math.pi / 180.0
+            margin_rad = max_margin
 
             # 限制margin范围，避免过大
-            margin_rad = min(margin_rad, math.pi / 4)  # 最大45度
+            margin_rad = min(margin_rad, math.pi)  # 最大45度
 
             margins[i] = margin_rad
 
@@ -537,8 +670,8 @@ class Trainer:
         """评估模型"""
         self.model.eval()
 
-        all_preds = []
-        all_labels = []
+        all_pred_label_idx = []
+        all_truth_label_idx = []
         all_features = []
         all_raw_labels = []
 
@@ -575,8 +708,8 @@ class Trainer:
                 num_batches += 1
                 pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-                all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
+                all_pred_label_idx.extend(preds.cpu().numpy())
+                all_truth_label_idx.extend(labels.cpu().numpy())
                 all_features.append(features.cpu())
                 all_raw_labels.extend(batch["raw_label"])
 
@@ -584,12 +717,14 @@ class Trainer:
         all_features = torch.cat(all_features, dim=0).numpy()
 
         # 计算指标
-        metrics = compute_metrics(all_labels, all_preds, list(range(self.num_classes)))
+        metrics = compute_metrics(
+            all_truth_label_idx, all_pred_label_idx, self.id2label
+        )
         metrics["val_loss"] = avg_loss
 
         # 保存到JSON
         json_path = os.path.join(
-            OUTPUT_DIR, f"{save_prefix}_metrics_epoch_{epoch}.json"
+            REPORT_OUTPUT_DIR, f"{save_prefix}_metrics_epoch_{epoch}.json"
         )
         with open(json_path, "w") as f:
             json.dump(metrics, f, indent=2)
@@ -615,7 +750,7 @@ class Trainer:
         )
 
         # 绘制可视化
-        self.visualize_epoch(all_features, all_labels, epoch, metrics)
+        self.visualize_epoch(all_features, all_truth_label_idx, epoch, metrics)
 
         return avg_loss, metrics
 
@@ -645,7 +780,11 @@ class Trainer:
             )
             plt.title(f"Geometric Median Prototype Similarity (%) - Epoch {epoch}")
             plt.tight_layout()
-            plt.savefig(os.path.join(OUTPUT_DIR, f"geo_median_sim_epoch_{epoch}.svg"))
+            plt.savefig(
+                os.path.join(
+                    PROTOTYPE_DISPERSION_OUTPUT_DIR, f"geo_median_sim_epoch_{epoch}.svg"
+                )
+            )
             plt.close()
 
         # 2. Weight prototype与Geometric median prototype相似度热力图
@@ -653,10 +792,11 @@ class Trainer:
         if self.geometric_medians.detach() is not None:
             sim_matrix = torch.matmul(self.geometric_medians.detach(), weight_protos.T)
             sim_matrix = ((sim_matrix + 1) / 2 * 100).cpu().numpy()
-
+            mask = np.triu(np.ones_like(sim_matrix, dtype=bool), k=1)
             plt.figure(figsize=(10, 8))
             sns.heatmap(
                 sim_matrix,
+                mask=mask,
                 annot=True,
                 fmt=".0f",
                 cmap="coolwarm",
@@ -669,7 +809,11 @@ class Trainer:
                 f"Weight vs Geometric Median Prototype Similarity (%) - Epoch {epoch}"
             )
             plt.tight_layout()
-            plt.savefig(os.path.join(OUTPUT_DIR, f"weight_geo_sim_epoch_{epoch}.svg"))
+            plt.savefig(
+                os.path.join(
+                    PROTOTYPE_ALIGNMENT_OUTPUT_DIR, f"weight_geo_sim_epoch_{epoch}.svg"
+                )
+            )
             plt.close()
 
         # 3. UMAP可视化
@@ -694,6 +838,18 @@ class Trainer:
                 color_map[label] = colors[idx % len(colors)]
                 idx += 1
 
+        # 后画负样本（Non-vul）
+        mask = np.array(labels) == self.non_vul_idx
+        plt.scatter(
+            embedding[mask, 0],
+            embedding[mask, 1],
+            c="gray",
+            label=self.id2label.get(self.non_vul_idx, "Non-vul"),
+            alpha=0.3,
+            s=30,
+            edgecolors="none",
+        )
+
         # 先画正样本（非Non-vul）
         for label in unique_labels:
             if label != self.non_vul_idx:
@@ -708,22 +864,10 @@ class Trainer:
                     edgecolors="none",
                 )
 
-        # 后画负样本（Non-vul）
-        mask = np.array(labels) == self.non_vul_idx
-        plt.scatter(
-            embedding[mask, 0],
-            embedding[mask, 1],
-            c="gray",
-            label=self.id2label.get(self.non_vul_idx, "Non-vul"),
-            alpha=0.3,
-            s=30,
-            edgecolors="none",
-        )
-
         plt.legend(loc="best", fontsize=8)
         plt.title(f"UMAP Visualization - Epoch {epoch}")
         plt.tight_layout()
-        plt.savefig(os.path.join(OUTPUT_DIR, f"umap_epoch_{epoch}.svg"))
+        plt.savefig(os.path.join(UMAP_OUTPUT_DIR, f"umap_epoch_{epoch}.svg"))
         plt.close()
 
     def train(self):
@@ -759,8 +903,7 @@ class Trainer:
             # 打印当前margin和kappa
             print("\nClass-wise Kappa and Margin:")
             for i in range(self.num_classes):
-                margin_deg = margins[i] * 180 / math.pi
-                print(f"  {self.id2label[i]}: κ={kappas[i]:.2f}, m={margin_deg:.2f}°")
+                print(f"  {self.id2label[i]}: κ={kappas[i]:.2f}, m={margins[i]}")
 
             # 3. 训练
             train_loss = self.train_epoch(train_loader, epoch)
