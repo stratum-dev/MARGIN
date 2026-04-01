@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import umap
 from datasets import load_dataset
 from scipy.stats import chi2
 from torch.amp import GradScaler, autocast
@@ -48,7 +47,7 @@ def compute_pairwise_margin(kappa_i, kappa_j, dim, alpha=0.95):
     term_i = math.sqrt(1 / kappa_i)
     term_j = math.sqrt(1 / kappa_j)
 
-    q = chi2.ppf(alpha, df=dim)
+    q = chi2.ppf(alpha, df=dim - 1)
     sqrt_q = math.sqrt(q)  # 关键修正！
 
     return 0.5 * sqrt_q * (term_j)  # 返回弧度

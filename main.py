@@ -48,7 +48,7 @@ EARLY_STOPPING_PATIENCE = MAX_EPOCHS
 SCHEDULER_PATIENCE = 3
 
 # ArcFace & 球面配置
-SCALE_FACTOR = 30.0  # s
+BASE_SCALE = 30.0  # s
 CONFIDENCE_ALPHA = 0.95  # α
 MIN_KAPPA = 1.0  # 防止kappa过小导致数值不稳定
 SEED = 42
@@ -81,7 +81,9 @@ set_seed(SEED)
 
 # ==================== 训练器 ====================
 class Trainer:
-    def __init__(self, model, train_dataset, val_dataset, label2id, id2label):
+    def __init__(
+        self, model: MARGINModel, train_dataset, val_dataset, label2id, id2label
+    ):
         self.model = model.to(DEVICE)
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
@@ -94,7 +96,9 @@ class Trainer:
         if "Non-vul" in label2id:
             self.non_vul_idx = label2id["Non-vul"]
 
-        self.criterion = MARGINLossHead(self.num_classes, SCALE_FACTOR).to(DEVICE)
+        self.criterion: MARGINLossHead = MARGINLossHead(
+            self.num_classes, BASE_SCALE
+        ).to(DEVICE)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
@@ -144,7 +148,6 @@ class Trainer:
     def compute_adaptive_margins(self, kappas):
         """基于kappas计算自适应margins"""
         margins = {}
-
         for i in range(self.num_classes):
             max_margin = 0.0
             for j in range(self.num_classes):
@@ -156,17 +159,36 @@ class Trainer:
                         kappa_i, kappa_j, EMBEDDING_DIM, CONFIDENCE_ALPHA
                     )
                     max_margin = max(max_margin, delta_m)
-
-            # 转换角度为弧度（因为ArcFace使用cos，内部使用弧度）
-            # 但compute_adaptive_margin返回的已经是角度值，需要转换为弧度
             margin_rad = max_margin
-
-            # 限制margin范围，避免过大
-            margin_rad = min(margin_rad, math.pi)  # 最大45度
-
+            margin_rad = min(margin_rad, math.pi)
             margins[i] = margin_rad
-
         return margins
+
+    def compute_adaptive_scales(self, kappas: dict):
+        """
+        使用 scale[i] = BASE_SCALE * mean(kappas) / kappa[i]
+        kappas: dict {class_idx: kappa_value}
+        """
+        scales = {}
+        if not kappas:
+            return scales
+
+        base_scale = getattr(self, "BASE_SCALE", 1.0)
+
+        # 计算平均值
+        kappa_mean = sum(kappas.values()) / len(kappas)
+
+        for i in range(self.num_classes):
+            kappa = kappas.get(i, kappa_mean)  # 如果缺失，则使用平均值
+
+            # 避免除以 0
+            if kappa <= 1e-6:
+                kappa = 1e-6
+
+            scale = base_scale * (kappa_mean / kappa)
+            scales[i] = float(scale)
+
+        return scales
 
     def compute_geometric_median_prototypes(self, dataloader):
         """计算几何中位数原型（基于训练集）"""
@@ -472,10 +494,16 @@ class Trainer:
             margins = self.compute_adaptive_margins(kappas)
             self.criterion.update_margins(margins)
 
+            # 3. 计算adaptive scales
+            scales = self.compute_adaptive_scales(kappas)
+            self.criterion.update_scales(scales)
+
             # 打印当前margin和kappa
             print("\nClass-wise Kappa and Margin:")
             for i in range(self.num_classes):
-                print(f"  {self.id2label[i]}: κ={kappas[i]:.2f}, m={margins[i]}")
+                print(
+                    f"  {self.id2label[i]}: κ={kappas[i]:.2f}, m={margins[i]}, s={scales[i]}"
+                )
 
             # 3. 训练
             train_loss = self.train_epoch(train_loader, epoch)
@@ -558,7 +586,6 @@ def main():
         num_classes=len(label2id),
         backbone=MODEL_NAME,
         embedding_dim=EMBEDDING_DIM,
-        scale=SCALE_FACTOR,
     )
 
     # 训练

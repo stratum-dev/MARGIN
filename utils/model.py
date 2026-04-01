@@ -6,10 +6,9 @@ from transformers import RobertaModel
 
 # ==================== 模型定义 ====================
 class MARGINModel(nn.Module):
-    def __init__(self, num_classes, backbone: str, embedding_dim: int, scale):
+    def __init__(self, num_classes, backbone: str, embedding_dim: int):
         super().__init__()
         self.roberta = RobertaModel.from_pretrained(backbone)
-        self.scale = scale
         self.num_classes = num_classes
 
         # Weight prototypes (已归一化)
@@ -42,58 +41,55 @@ class MARGINModel(nn.Module):
 
 # ==================== ArcFace Loss with Adaptive Margin ====================
 class MARGINLossHead(nn.Module):
+
     def __init__(self, num_classes, scale):
         super().__init__()
+
         self.scale = scale
         self.num_classes = num_classes
-        self.register_buffer("margins", torch.zeros(num_classes))
-        self.register_buffer("kappas", torch.ones(num_classes) * 1)
+
+        self.register_buffer("margins", torch.ones(num_classes))
+        self.register_buffer("kappas", torch.ones(num_classes))
+        self.register_buffer("scales", torch.ones(num_classes))
 
     def update_margins(self, margins_dict):
-        """更新各类别的margin，margins_dict: {class_idx: margin_value}"""
         for idx, margin in margins_dict.items():
-            self.margins[idx] = margin
+            self.margins[idx] = torch.tensor(margin, device=self.margins.device)
 
     def update_kappas(self, kappas_dict):
-        """更新各类别的kappa，kappas_dict: {class_idx: kappa_value}"""
         for idx, kappa in kappas_dict.items():
-            self.kappas[idx] = kappa
+            self.kappas[idx] = torch.tensor(kappa, device=self.kappas.device)
+
+    def update_scales(self, scale_dict):
+        for idx, scale in scale_dict.items():
+            self.scales[idx] = torch.tensor(scale, device=self.scales.device)
 
     def forward(self, cos_theta, labels):
-        """
-        cos_theta: [B, C] 余弦相似度
-        labels: [B] 类别索引
-        """
-        batch_size = cos_theta.size(0)
+        B, C = cos_theta.shape
 
-        # 获取对应类别的margin
+        # ✅ margins 按标签取（每个样本一个 margin）
         margins_batch = self.margins[labels]  # [B]
 
-        # 计算 theta = arccos(cos_theta)，需要数值稳定性
-        cos_theta_clamped = torch.clamp(cos_theta, -1.0 + 1e-7, 1.0 - 1e-7)
-        theta = torch.acos(cos_theta_clamped)
+        cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
 
-        # 应用margin: cos(theta + m)
-        # 使用cos加法公式: cos(a+b) = cos(a)cos(b) - sin(a)sin(b)
         cos_m = torch.cos(margins_batch)
         sin_m = torch.sin(margins_batch)
-        sin_theta = torch.sqrt(1.0 - torch.pow(cos_theta_clamped, 2))
 
-        # 只对正类应用margin
-        one_hot = torch.zeros_like(cos_theta)
-        one_hot.scatter_(1, labels.view(-1, 1), 1.0)
+        sin_theta = torch.sqrt(torch.clamp(1 - cos_theta**2, min=1e-7))
 
-        cos_theta_plus_m = cos_theta_clamped * cos_m.unsqueeze(
+        cos_theta_plus_m = cos_theta * cos_m.unsqueeze(1) - sin_theta * sin_m.unsqueeze(
             1
-        ) - sin_theta * sin_m.unsqueeze(1)
+        )
 
-        # 混合：正类用cos(theta+m)，负类保持cos(theta)
-        output = cos_theta_clamped * (1.0 - one_hot) + cos_theta_plus_m * one_hot
+        one_hot = F.one_hot(labels, C).float()
 
-        # 缩放
+        output = cos_theta * (1 - one_hot) + cos_theta_plus_m * one_hot
+
+        # self.scales: [C] → unsqueeze(0): [1, C] → 广播到 [B, C]
+        output = output * self.scales.unsqueeze(0)
+
+        # global scale
         output = output * self.scale
 
-        # 交叉熵
         loss = F.cross_entropy(output, labels)
-
         return loss
