@@ -1,0 +1,48 @@
+from torch.utils.data import DataLoader, Dataset
+
+
+# ==================== 数据集类 ====================
+class CodeDataset(Dataset):
+    def __init__(self, hf_dataset, tokenizer, max_length):
+        self.dataset = hf_dataset
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        # 构建标签映射
+        self.label2id = {}
+        self.id2label = {}
+        self._build_label_mapping()
+
+    def _build_label_mapping(self):
+        labels = sorted(set(self.dataset["label"]))
+
+        # 把 Non-vul 放到最前面
+        if "Non-vul" in labels:
+            labels.remove("Non-vul")
+            labels.insert(0, "Non-vul")
+
+        for idx, label in enumerate(labels):
+            self.label2id[label] = idx
+            self.id2label[idx] = label
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        code = item["source"]
+        label = item["label"]
+
+        encoding = self.tokenizer(
+            code,
+            max_length=self.max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        return {
+            "input_ids": encoding["input_ids"].squeeze(0),
+            "attention_mask": encoding["attention_mask"].squeeze(0),
+            "label": self.label2id[label],
+            "raw_label": label,
+        }
