@@ -9,7 +9,6 @@ from datasets import load_dataset
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoTokenizer
 from utils.seed import set_seed
 from utils.metrics import compute_metrics
 from utils.dataset import CodeDataset
@@ -70,10 +69,6 @@ os.makedirs(REPORT_OUTPUT_DIR, exist_ok=True)
 UMAP_N_NEIGHBORS = 15
 UMAP_MIN_DIST = 0.1
 
-# 几何中位数配置
-GEOMEDIAN_MAX_ITER = 100
-GEOMEDIAN_TOL = 1e-5
-
 set_seed(SEED)
 
 
@@ -93,8 +88,15 @@ class Trainer:
         self.non_vul_idx = 0
 
         self.criterion: MARGINLossHead = MARGINLossHead(
-            self.num_classes, BASE_SCALE
+            self.num_classes
         ).to(DEVICE)
+
+        # ========== 新增：运行时统计量 ==========
+        self.running_feature_sums = torch.zeros(
+            self.num_classes, EMBEDDING_DIM, device=DEVICE
+        )
+        self.class_counts = torch.zeros(self.num_classes, device=DEVICE)
+
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
@@ -104,62 +106,12 @@ class Trainer:
         self.patience_counter = 0
         self.best_model_state = None
 
-        # ========== 新增：运行时统计量 ==========
-        self.running_feature_sums = torch.zeros(
-            self.num_classes, EMBEDDING_DIM, device=DEVICE
-        )
-        self.class_counts = torch.zeros(self.num_classes, device=DEVICE)
         # 初始化 geometric_medians 为 weight prototypes（归一化）
         with torch.no_grad():
             weight_protos = self.model.get_weight_prototypes().detach()
             self.geometric_medians = F.normalize(weight_protos, dim=1).clone()
         # 初始化 kappas 为 1.0
         self.kappas = {i: 1.0 for i in range(self.num_classes)}
-
-    def reset_running_stats(self):
-        """每个 epoch 开始前重置统计量"""
-        self.running_feature_sums.zero_()
-        self.class_counts.zero_()
-
-    def update_running_stats(self, features: torch.Tensor, labels: torch.Tensor):
-        """在训练 batch 中更新 running feature sums 和 counts"""
-        features = F.normalize(features.detach(), dim=1)  # 球面特征
-        for i in range(len(labels)):
-            label = labels[i].item()
-            self.running_feature_sums[label] += features[i]
-            self.class_counts[label] += 1
-
-    def finalize_epoch_stats(self):
-        """在 epoch 结束时，用 running stats 计算 kappas 和 geometric medians"""
-        # 更新 geometric medians ≈ normalized class means
-        new_geometric_medians = torch.zeros_like(self.geometric_medians)
-        new_kappas = {}
-
-        for class_idx in range(self.num_classes):
-            count = self.class_counts[class_idx].item()
-            if count > 0:
-                mean_vec = self.running_feature_sums[class_idx] / count
-                norm_mean = torch.norm(mean_vec).item()
-                # 几何中位数近似为归一化均值方向
-                new_geometric_medians[class_idx] = F.normalize(mean_vec, dim=0)
-                # 计算 kappa
-                kappa = compute_vmf_kappa(torch.tensor(norm_mean), EMBEDDING_DIM)
-                kappa = max(kappa, MIN_KAPPA)
-                new_kappas[class_idx] = kappa
-            else:
-                # 如果该类本轮无样本，保留上一轮值（或初始化值）
-                new_geometric_medians[class_idx] = self.geometric_medians[class_idx]
-                new_kappas[class_idx] = self.kappas.get(class_idx, 1.0)
-
-        self.geometric_medians = new_geometric_medians
-        self.kappas = new_kappas
-
-        # 更新 criterion
-        self.criterion.update_kappas(self.kappas)
-        margins = self.compute_adaptive_margins(self.kappas)
-        scales = self.compute_adaptive_scales(self.kappas)
-        self.criterion.update_margins(margins)
-        self.criterion.update_scales(scales)
 
     def compute_adaptive_margins(self, kappas):
         """保持不变"""
@@ -193,14 +145,52 @@ class Trainer:
             scales[i] = float(scale)
         return scales
 
+    def update_running_stats(self, features: torch.Tensor, labels: torch.Tensor):
+        """在训练 batch 中更新 running feature sums 和 counts"""
+        features = F.normalize(features.detach(), dim=1)  # 球面特征
+        for i in range(len(labels)):
+            label = labels[i].item()
+            self.running_feature_sums[label] += features[i]
+            self.class_counts[label] += 1
+    
+    def finalize_epoch_stats(self):
+        """在 epoch 结束时，用 running stats 计算 kappas 和 geometric medians"""
+        # 更新 geometric medians ≈ normalized class means
+        new_geometric_medians = torch.zeros_like(self.geometric_medians)
+        new_kappas = {}
+
+        for class_idx in range(self.num_classes):
+            count = self.class_counts[class_idx].item()
+            if count > 0:
+                mean_vec = self.running_feature_sums[class_idx] / count
+                norm_mean = torch.norm(mean_vec).item()
+                # 几何中位数近似为归一化均值方向
+                new_geometric_medians[class_idx] = F.normalize(mean_vec, dim=0)
+                # 计算 kappa
+                kappa = compute_vmf_kappa(torch.tensor(norm_mean), EMBEDDING_DIM)
+                kappa = max(kappa, MIN_KAPPA)
+                new_kappas[class_idx] = kappa
+            else:
+                # 如果该类本轮无样本，保留上一轮值（或初始化值）
+                new_geometric_medians[class_idx] = self.geometric_medians[class_idx]
+                new_kappas[class_idx] = self.kappas.get(class_idx, 1.0)
+
+        self.geometric_medians = new_geometric_medians
+        self.kappas = new_kappas
+
+        # 更新 criterion
+        margins = self.compute_adaptive_margins(self.kappas)
+        scales = self.compute_adaptive_scales(self.kappas)        
+
+        self.criterion.update_kappas(self.kappas)
+        self.criterion.update_margins(margins)
+        self.criterion.update_scales(scales)
+
     def train_epoch(self, dataloader, epoch):
         """训练一个epoch，并在线更新统计量"""
         self.model.train()
         total_loss = 0.0
         num_batches = 0
-
-        # 重置 running stats
-        self.reset_running_stats()
 
         pbar = tqdm(dataloader, desc=f"Epoch {epoch} Training", leave=False)
         for batch in pbar:
@@ -222,14 +212,10 @@ class Trainer:
 
             # ========== 关键：更新 running stats ==========
             self.update_running_stats(features, labels)
-
             total_loss += loss.item()
             num_batches += 1
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-
-        # ========== 在 epoch 结束时 finalize stats ==========
         self.finalize_epoch_stats()
-
         return total_loss / num_batches
 
     def evaluate(self, dataloader, epoch, save_prefix="val"):
@@ -257,13 +243,8 @@ class Trainer:
                 )
 
                 # 计算与几何中位数原型的余弦相似度
-                if self.geometric_medians is not None:
-                    sim = torch.matmul(features, self.geometric_medians.t())
-                    preds = torch.argmax(sim, dim=1)
-                else:
-                    # 如果没有几何中位数，使用weight prototypes
-                    cos_theta = self.model(input_ids, attention_mask)
-                    preds = torch.argmax(cos_theta, dim=1)
+                sim = torch.matmul(features, self.geometric_medians.t())
+                preds = torch.argmax(sim, dim=1)
 
                 # 计算loss（用于早停）
                 with autocast(DEVICE):
@@ -316,7 +297,7 @@ class Trainer:
         )
 
         # 绘制可视化
-        self.visualize_epoch(all_features, all_pred_label_idx, epoch)
+        self.visualize_epoch(all_features, all_truth_label_idx, epoch)
         return avg_loss, metrics
 
     def visualize_epoch(self, features, truth_label_idx, epoch):

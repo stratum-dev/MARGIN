@@ -1,20 +1,4 @@
-import json
-import math
-import os
-import warnings
-from datetime import datetime
-
-import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import umap
-from datasets import load_dataset
-from scipy.optimize import minimize
-from scipy.special import erfinv
-from scipy.stats import chi2, vonmises_fisher
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -23,11 +7,6 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from torch.amp import GradScaler, autocast
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-from transformers import RobertaConfig, RobertaModel, RobertaTokenizer
-from utils.seed import set_seed
 
 
 # ==================== 评估指标计算 ====================

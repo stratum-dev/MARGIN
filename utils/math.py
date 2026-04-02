@@ -51,7 +51,7 @@ def compute_pairwise_margin(kappa_i, kappa_j, dim, alpha=0.95):
     return 0.5 * term_i  # 返回弧度
 
 
-def compute_geometric_median(features, max_iter, tol):
+def compute_geometric_median(features, max_iter, tol = 1e-5):
     """
     在单位超球面上计算几何中位数
     features: [N, D] 已归一化的特征

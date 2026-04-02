@@ -42,10 +42,8 @@ class MARGINModel(nn.Module):
 # ==================== ArcFace Loss with Adaptive Margin ====================
 class MARGINLossHead(nn.Module):
 
-    def __init__(self, num_classes, scale):
+    def __init__(self, num_classes):
         super().__init__()
-
-        self.scale = scale
         self.num_classes = num_classes
 
         self.register_buffer("margins", torch.ones(num_classes))
@@ -87,9 +85,6 @@ class MARGINLossHead(nn.Module):
 
         # self.scales: [C] → unsqueeze(0): [1, C] → 广播到 [B, C]
         output = output * self.scales.unsqueeze(0)
-
-        # global scale
-        output = output * self.scale
 
         loss = F.cross_entropy(output, labels)
         return loss
