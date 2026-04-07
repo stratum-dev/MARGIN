@@ -27,6 +27,31 @@ def compute_vmf_kappa(features, dim):
 
     return torch.tensor(kappa)
 
+def compute_margin(
+    n: int,
+    count_i: int,
+    kappa_i: float,
+    dim: int,
+    alpha: float = 0.95,
+):
+    """
+    Geometric margin:
+    spherical cap angle - Voronoi cone angle
+    """
+
+    # predictive uncertainty
+    q = chi2.ppf(alpha, df=dim - 1)
+
+    kappa_i_eff = kappa_i * count_i / (count_i + 1)
+
+    theta_i = math.sqrt(q / kappa_i_eff)
+
+    # ETF Voronoi cone angle
+    theta_voronoi = 0.5 * math.acos(-1 / (n - 1))
+
+    margin = max(1e-6, theta_i - theta_voronoi)
+
+    return margin
 
 def compute_pairwise_margin(
     n: int,
@@ -38,12 +63,15 @@ def compute_pairwise_margin(
     kappa_j: float,
     dim: int,
     alpha: float = 0.95,
-    temperature: float = 0.3,
+    temperature: float = 0.5,
 ):
     """
     vMF predictive margin
     """
 
+    q = chi2.ppf(alpha, df=dim - 1)
+
+    # predictive uncertainty
     mu_i = F.normalize(mu_i, dim=0)
     mu_j = F.normalize(mu_j, dim=0)
 
@@ -52,18 +80,23 @@ def compute_pairwise_margin(
 
     q = chi2.ppf(alpha, df=dim - 1)
 
-    # predictive uncertainty
-    # theta_i = math.sqrt(q / kappa_i)
-    # theta_j = math.sqrt(q / kappa_j)
+    theta_i = math.sqrt(q / kappa_i)
+    theta_j = math.sqrt(q / kappa_j)
 
-    kappa_i_eff = kappa_i * count_i / (count_i + 1)
-    kappa_j_eff = kappa_j * count_j / (count_j + 1)
+    sigma = math.sqrt(
+        theta_i +
+        theta_j
+    )
 
-    theta_i = math.sqrt(q / kappa_i_eff)
-    theta_j = math.sqrt(q / kappa_j_eff)
+    # kappa_i_eff = kappa_i * count_i / (count_i + 1)
+    # kappa_j_eff = kappa_j * count_j / (count_j + 1)
 
-    margin = max(0.0, theta_i + theta_j - theta_ij) * temperature
+    # theta_i = math.sqrt(q / kappa_i_eff)
+    # theta_j = math.sqrt(q / kappa_j_eff)
 
+    # margin = max(0.0, theta_i + theta_j - theta_ij) * temperature
+    margin = sigma / (sigma + theta_ij)
+    
     return margin
 
 

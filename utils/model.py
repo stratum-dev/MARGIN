@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoConfig, AutoModelForTextEncoding
 from utils.dataset import CodeDataset
-from utils.math import compute_pairwise_margin
+from utils.math import compute_pairwise_margin, compute_margin
 
 
 # ==================== 模型定义 ====================
@@ -17,7 +17,7 @@ class MARGINModel(nn.Module):
         alpha: float,
         train_dataset: CodeDataset,
         val_dataset: CodeDataset,
-        dropout_rate: float = 0.0, # 1. 新增参数
+        dropout_rate: float = 0.0,  # 1. 新增参数
     ):
         super().__init__()
         self.roberta = AutoModelForTextEncoding.from_pretrained(backbone)
@@ -25,7 +25,7 @@ class MARGINModel(nn.Module):
 
         self.embedding_dim = self.config.hidden_size
         self.num_classes = len(train_dataset.label2idx)
-        self.dropout = nn.Dropout(dropout_rate) 
+        self.dropout = nn.Dropout(dropout_rate)
         self.weight_prototypes = nn.Parameter(
             F.normalize(torch.randn(self.num_classes, self.embedding_dim), p=2, dim=1)
         )
@@ -100,40 +100,19 @@ class MARGINLossHead(nn.Module):
 
         # --- 计算 margins ---
         margins = torch.zeros(C, device=device)
-        
+
         for i in range(C):
-            mu_i = mean_prototypes[i]
             count_i = class_counts[i]
             kappa_i = torch.clamp(kappas[i], min=1.0)
-        
-            pairwise_margins = []
-        
-            for j in range(C):
-                if i == j:
-                    continue
-                
-                mu_j = mean_prototypes[j]
-                count_j = class_counts[j]
-                kappa_j = torch.clamp(kappas[j], min=1.0)
-        
-                delta_m = compute_pairwise_margin(
-                    self.num_classes,
-                    mu_i,
-                    count_i,
-                    kappa_i,
-                    mu_j,
-                    count_j,
-                    kappa_j,
-                    self.dim,
-                )
-        
-                pairwise_margins.append(delta_m)
-        
-            pairwise_margins = torch.tensor(pairwise_margins, device=device)
-        
-            margin_rad = min(torch.max(pairwise_margins).item(), math.pi)
-            margins[i] = margin_rad
-        
+
+            margin = compute_margin(
+                self.num_classes,
+                count_i,
+                kappa_i,
+                self.dim,
+            )
+            margins[i] = margin
+
         self.margins = margins
         self.kappas = kappas
         self.scales = scales
