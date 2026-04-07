@@ -43,7 +43,7 @@ EARLY_STOPPING_PATIENCE = MAX_EPOCHS
 SCHEDULER_PATIENCE = 3
 
 # ArcFace & 球面配置
-BASE_SCALE = 10.0  # s
+BASE_SCALE = 1  # s
 CONFIDENCE_ALPHA = 0.95  # α
 MIN_KAPPA = 1.0  # 防止kappa过小导致数值不稳定
 SEED = 42
@@ -153,16 +153,17 @@ class Trainer:
 
             # 2. 只进行一次归一化，复用结果
             # 注意：geometric median 和 kappa 计算通常都需要单位向量
-            feats_tensor_norm = F.normalize(feats_tensor, p=2, dim=0)
+            feats_tensor_norm = F.normalize(feats_tensor, p=2, dim=1)
 
             # Mean Prototype (在归一化前或后计算取决于你的定义，通常 Mean of Normals 是标准做法)
-            mean_proto = feats_tensor_norm.mean(dim=0)
+            mean_proto = F.normalize(feats_tensor_norm.mean(dim=0), dim=0)
             mean_prototypes_list.append(mean_proto)
 
             # Geometric Median Prototype
             geom_median_proto = compute_geometric_median(
                 feats_tensor_norm, max_iter=geometric_median_max_iter
             )
+            geom_median_proto = F.normalize(geom_median_proto, dim=0)
             geom_median_prototypes_list.append(geom_median_proto)
 
             # Kappa (复用上面的 feats_tensor_norm)
@@ -180,31 +181,7 @@ class Trainer:
 
         self.model.current_kappas = torch.stack(kappas_list).to(DEVICE)  # [C]
         self.model.class_counts = torch.tensor(class_counts_list).to(DEVICE)  # [C]
-
-        # 1. 将列表转为 Tensor，方便计算
-        current_kappas_tensor = torch.stack(kappas_list).to(DEVICE) # [C]
-
-        # 2. 获取模型中存储的历史 EMA Kappa
-        # 注意：第一次运行时，model.current_kappas 可能是 None 或初始值，需要处理
-        if self.model.current_kappas is None:
-            # 如果是第一次，直接使用当前值（或者全1初始化）
-            smoothed_kappas = current_kappas_tensor
-        else:
-            # 3. 定义 EMA 动量系数 (Momentum)
-            # 这是一个超参数，通常设为 0.9, 0.99, 0.999。值越大，历史权重越重，越平滑。
-            EMA_MOMENTUM = 0.999
-
-            # 4. 执行 EMA 更新公式
-            # smoothed = momentum * old + (1 - momentum) * new
-            smoothed_kappas = (
-                EMA_MOMENTUM * self.model.current_kappas 
-                + (1 - EMA_MOMENTUM) * current_kappas_tensor
-            )
-
-        # 5. 强制更新回模型属性
-        # 这一步替代了原来的直接赋值逻辑
-        self.model.current_kappas = smoothed_kappas
-
+        self.model.current_kappas = torch.stack(kappas_list).to(DEVICE)  # [C]
 
         # 更新损失函数的自适应参数
         self.classification_loss.update_adaptive_params(

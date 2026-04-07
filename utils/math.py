@@ -25,7 +25,7 @@ def compute_vmf_kappa(features, dim):
         # 高阶修正项
         kappa = kappa - (dim - 3) / (4 * kappa)
 
-    return torch.clamp(torch.tensor(kappa), 1.0, 5000.0)
+    return torch.tensor(kappa)
 
 
 def compute_pairwise_margin(
@@ -38,51 +38,33 @@ def compute_pairwise_margin(
     kappa_j: float,
     dim: int,
     alpha: float = 0.95,
+    temperature: float = 0.3,
 ):
     """
-    基于预测分布的 margin（新样本的不确定性）
+    vMF predictive margin
     """
+
     mu_i = F.normalize(mu_i, dim=0)
     mu_j = F.normalize(mu_j, dim=0)
-    
-    # 中心夹角
+
     cos_theta = torch.dot(mu_i, mu_j).clamp(-1.0, 1.0)
     theta_ij = torch.acos(cos_theta).item()
-    
-    # === 关键：预测不确定性 vs 参数不确定性 ===
-    # 参数不确定性：σ²_μ ≈ 1/(n*κ)  —— 你当前用的
-    # 预测不确定性：σ²_pred ≈ 1/κ + 1/(n*κ) ≈ 1/κ （主导项）
-    
-    # 对于 vMF，新样本的分布就是 vMF(μ, κ)
-    # 我们关心的是：两个分布的重叠程度
-    
+
     q = chi2.ppf(alpha, df=dim - 1)
-    
-    # 参数不确定性（估计误差）
-    param_uncertainty_i = math.sqrt(q / (count_i * kappa_i))
-    param_uncertainty_j = math.sqrt(q / (count_j * kappa_j))
-    
-    # 预测不确定性：考虑 κ 本身描述的固有分散
-    # 对于 vMF，"预测球冠"应该基于 κ 本身
-    # 这里用启发式：结合参数不确定性和分布本身的集中度
-    
-    # 方法1：直接用 1/κ 作为预测方差
-    predictive_var_i = 1.0 / kappa_i + 1.0 / (count_i * kappa_i)
-    predictive_var_j = 1.0 / kappa_j + 1.0 / (count_j * kappa_j)
-    
-    theta_i = math.sqrt(q * param_uncertainty_i)
-    theta_j = math.sqrt(q * param_uncertainty_j)
-    
-    # 或者更简单的启发式：降低有效 κ
-    # effective_kappa_i = kappa_i * (1 - 1/count_i)  # 小样本修正
-    
-    # 计算重叠
-    # if theta_ij >= theta_i + theta_j:
-    #     return 0.0
-    # else:
-    #     return max(0.0, theta_i + theta_j - theta_ij)
-    
-    return 0
+
+    # predictive uncertainty
+    # theta_i = math.sqrt(q / kappa_i)
+    # theta_j = math.sqrt(q / kappa_j)
+
+    kappa_i_eff = kappa_i * count_i / (count_i + 1)
+    kappa_j_eff = kappa_j * count_j / (count_j + 1)
+
+    theta_i = math.sqrt(q / kappa_i_eff)
+    theta_j = math.sqrt(q / kappa_j_eff)
+
+    margin = max(0.0, theta_i + theta_j - theta_ij) * temperature
+
+    return margin
 
 
 def compute_geometric_median(features, max_iter, tol=1e-5):

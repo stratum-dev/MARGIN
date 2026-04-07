@@ -18,7 +18,7 @@ def draw_prototype_dispersion(
         annot=True,
         mask=mask,
         fmt=".0f",
-        cmap="YlOrRd",
+        cmap="viridis",
         vmin=-100,
         vmax=100,
         xticklabels=[id2label[i] for i in range(len(id2label))],
