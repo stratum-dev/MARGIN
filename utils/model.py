@@ -71,7 +71,9 @@ class MARGINLossHead(nn.Module):
 
         self.register_buffer("margins", torch.zeros(num_classes))
         self.register_buffer("kappas", torch.zeros(num_classes))
-        self.register_buffer("scales", torch.full((num_classes,), base_scale))
+        self.register_buffer(
+            "scales", torch.full((num_classes,), base_scale, dtype=torch.float32)
+        )
 
     def update_adaptive_params(
         self,

@@ -72,6 +72,7 @@ UMAP_MIN_DIST = 0.1
 set_seed(SEED)
 log.set_log_file(os.path.join(OUTPUT_DIR, "train.log"))
 
+
 # ==================== 训练器 ====================
 class Trainer:
     def __init__(self, model: MARGINModel):
@@ -222,7 +223,9 @@ class Trainer:
             json.dump(metrics, f, indent=2)
 
         # 打印指标
-        log.print(f"\nEpoch {epoch} Evaluation Results: ==========================================")
+        log.print(
+            f"\nEpoch {epoch} Evaluation Results: =========================================="
+        )
         log.print("Classification Metrics: ---------------------------------")
         log.print(
             f"🐱 Binary - MCC: {classification_metrics['binary']['mcc']:.4f}, F1: {classification_metrics['binary']['f1']:.4f}, "
@@ -246,7 +249,15 @@ class Trainer:
         log.print(print_dict_pipe(etf_metrics))
 
         log.print("Statistics Metrics: ---------------------------------")
-        log.print(print_dict_pipe(statistics_metrics))
+        log.print(
+            f"Margin - Mean: {statistics_metrics['summary']['margin_mean']:.4f}, Std: {statistics_metrics['summary']['margin_std']:.4f}"
+        )
+        log.print(
+            f"Scale - Mean: {statistics_metrics['summary']['scale_mean']:.4f}, Std: {statistics_metrics['summary']['scale_std']:.4f}"
+        )
+        log.print(
+            f"Kappa - Mean: {statistics_metrics['summary']['kappa_mean']:.4f}, Std: {statistics_metrics['summary']['kappa_std']:.4f}"
+        )
 
         # 绘制可视化
         self.visualize_epoch(all_features, all_truth_label_idx, epoch)
@@ -316,10 +327,10 @@ class Trainer:
             log.print(f"\nTrain Loss: {train_loss:.4f}")
 
             # 注意：geometric_medians 已在 train_epoch 结尾更新，可直接用于 evaluate
-            avg_val_loss, val_classification_metrics = self.evaluate_epoch(
-                val_loader, epoch
-            )
-            val_global_mcc = val_classification_metrics["global_macro"]["mcc"]
+            avg_val_loss, val_metrics = self.evaluate_epoch(val_loader, epoch)
+            val_global_mcc = val_metrics["classification_metrics"]["global_macro"][
+                "mcc"
+            ]
             log.print(f"Val Loss: {avg_val_loss:.4f}")
 
             # 早停逻辑不变
@@ -343,7 +354,9 @@ class Trainer:
                     break
 
         if self.best_model_state is not None:
-            log.print(f"\nLoading best model from epoch {self.best_model_state['epoch']}")
+            log.print(
+                f"\nLoading best model from epoch {self.best_model_state['epoch']}"
+            )
             self.model.load_state_dict(self.best_model_state["model_state_dict"])
 
         return self.model

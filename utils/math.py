@@ -27,6 +27,7 @@ def compute_vmf_kappa(features, dim):
 
     return torch.tensor(kappa)
 
+
 def compute_margin(
     n: int,
     count_i: int,
@@ -52,6 +53,7 @@ def compute_margin(
     margin = max(1e-6, theta_i - theta_voronoi)
 
     return margin
+
 
 def compute_pairwise_margin(
     n: int,
@@ -83,10 +85,7 @@ def compute_pairwise_margin(
     theta_i = math.sqrt(q / kappa_i)
     theta_j = math.sqrt(q / kappa_j)
 
-    sigma = math.sqrt(
-        theta_i +
-        theta_j
-    )
+    sigma = math.sqrt(theta_i + theta_j)
 
     # kappa_i_eff = kappa_i * count_i / (count_i + 1)
     # kappa_j_eff = kappa_j * count_j / (count_j + 1)
@@ -96,7 +95,7 @@ def compute_pairwise_margin(
 
     # margin = max(0.0, theta_i + theta_j - theta_ij) * temperature
     margin = sigma / (sigma + theta_ij)
-    
+
     return margin
 
 

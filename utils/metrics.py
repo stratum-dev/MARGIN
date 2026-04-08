@@ -306,31 +306,47 @@ def compute_etf_metrics(prototypes: torch.Tensor):
     target = torch.full((K, K), -1 / (K - 1), device=P.device)
     target.fill_diagonal_(1)
     etf_error = torch.norm(G - target, p="fro").item()
+    etf_error_norm = etf_error / K  # 归一化
 
-    # 2. Cosine variance
+    # 2. Off-diagonal cosines
     mask = ~torch.eye(K, dtype=bool, device=P.device)
     cosines = G[mask]
+
+    # 3. Cosine variance / std
     cosine_variance = cosines.var().item()
+    cosine_std = cosines.std().item()
 
-    # 3. Welch bound gap
-    max_cos = cosines.abs().max().item()
-    welch_bound = math.sqrt((K - d) / (d * (K - 1)))
-    welch_gap = max_cos - welch_bound
-
-    # 4. Average cosine deviation
+    # 4. Average cosine deviation from ETF ideal
     avg_cosine_deviation = torch.mean(torch.abs(cosines - (-1 / (K - 1)))).item()
+    max_cosine_deviation = torch.max(torch.abs(cosines - (-1 / (K - 1)))).item()
 
-    # 5. Gram eigenvalue deviation
+    # 5. Average angle deviation (rad)
+    angles = torch.acos(cosines.clamp(-1, 1))
+    etf_angle = math.acos(-1 / (K - 1))
+    avg_angle_deviation = torch.mean(torch.abs(angles - etf_angle)).item()
+    max_angle_deviation = torch.max(torch.abs(angles - etf_angle)).item()
+
+    # 6. Gram eigenvalue statistics
     eigvals = torch.linalg.eigvalsh(G)
     non_zero_eig = eigvals[eigvals > 1e-6]
     eig_var = non_zero_eig.var().item()
+    eig_mean = non_zero_eig.mean().item()
+
+    # 7. Gram condition number
+    cond_num = torch.linalg.cond(G).item()
 
     return {
         "etf_error": etf_error,
+        "etf_error_norm": etf_error_norm,
         "cosine_variance": cosine_variance,
-        "welch_gap": welch_gap,
+        "cosine_std": cosine_std,
         "avg_cosine_deviation": avg_cosine_deviation,
+        "max_cosine_deviation": max_cosine_deviation,
+        "avg_angle_deviation": avg_angle_deviation,
+        "max_angle_deviation": max_angle_deviation,
         "eig_var": eig_var,
+        "eig_mean": eig_mean,
+        "cond_num": cond_num,
     }
 
 
