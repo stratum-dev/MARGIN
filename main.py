@@ -29,15 +29,15 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==================== 常量配置区 ====================
 # 数据配置
 DATASET_NAME = "codemetic/MARGIN"
-DATASET_SUBSET = "debug"  # 可选其他subset
+DATASET_SUBSET = "debug"  # 可选其他 subset
 MAX_LENGTH = 512
 
 # 模型配置
 MODEL_NAME = "Salesforce/codet5-base"
-EMBEDDING_DIM = 768  # graphcodebert-base的维度
+EMBEDDING_DIM = 768  # graphcodebert-base 的维度
 
 # 训练配置
-BATCH_SIZE = 40
+BATCH_SIZE = 16
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY = 0.01
 MAX_EPOCHS = 200
@@ -47,7 +47,6 @@ SCHEDULER_PATIENCE = 3
 # ArcFace & 球面配置
 BASE_SCALE = 15  # s
 CONFIDENCE_ALPHA = 0.95  # α
-MIN_KAPPA = 1.0  # 防止kappa过小导致数值不稳定
 SEED = 42
 
 # 设备配置
@@ -65,7 +64,7 @@ os.makedirs(PROTOTYPE_ALIGNMENT_OUTPUT_DIR, exist_ok=True)
 os.makedirs(PROTOTYPE_DISPERSION_OUTPUT_DIR, exist_ok=True)
 os.makedirs(REPORT_OUTPUT_DIR, exist_ok=True)
 
-# UMAP配置
+# UMAP 配置
 UMAP_N_NEIGHBORS = 15
 UMAP_MIN_DIST = 0.1
 
@@ -102,7 +101,6 @@ class Trainer:
             label_idxs = batch["label_idx"].to(DEVICE)
 
             self.optimizer.zero_grad()
-
             with autocast(DEVICE):
                 cos_theta, features = self.model(
                     input_ids, attention_mask, return_features=True
@@ -200,7 +198,7 @@ class Trainer:
         etf_metrics = metrics["etf_metrics"]
         statistics_metrics = metrics["statistics_metrics"]
 
-        # 保存到JSON
+        # 保存到 JSON
         json_path = os.path.join(
             REPORT_OUTPUT_DIR, f"{save_prefix}_metrics_epoch_{epoch}.json"
         )
@@ -249,7 +247,7 @@ class Trainer:
         return avg_loss, metrics
 
     def visualize_epoch(self, features, truth_label_idx, epoch):
-        """绘制热力图和UMAP"""
+        """绘制热力图和 UMAP"""
 
         # 1. 几何中位数原型相似度热力图
         draw_prototype_dispersion(
@@ -261,7 +259,7 @@ class Trainer:
             ),
         )
 
-        # 2. Weight prototype与Geometric median prototype相似度热力图
+        # 2. Weight prototype 与 Geometric median prototype 相似度热力图
         draw_prototype_alignment(
             self.model.current_geometric_median_prototypes,
             self.model.get_weight_prototypes(),
@@ -272,7 +270,7 @@ class Trainer:
             ),
         )
 
-        # 3. UMAP可视化
+        # 3. UMAP 可视化
         draw_umap(
             features,
             truth_label_idx,
@@ -358,7 +356,7 @@ class Trainer:
 # ==================== 主函数 ====================
 def main():
     log.print("Loading dataset...")
-    # 加载HuggingFace数据集
+    # 加载 HuggingFace 数据集
     dataset = load_dataset(DATASET_NAME, DATASET_SUBSET)
 
     train_hf = dataset["train"]
@@ -369,7 +367,7 @@ def main():
         f"Train size: {len(train_hf)}, Val size: {len(val_hf)}, Test size: {len(test_hf)}"
     )
 
-    # 初始化tokenizer
+    # 初始化 tokenizer
     log.print(f"Loading tokenizer and model: {MODEL_NAME}")
 
     # 创建数据集

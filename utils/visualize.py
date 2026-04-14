@@ -5,7 +5,7 @@ import seaborn as sns
 import umap
 
 
-def draw_prototype_dispersion(
+def draw_prototype_dispersion_no_num(
     geometric_median_prototypes: torch.Tensor,
     id2label: dict,
     title: str,
@@ -40,7 +40,7 @@ def draw_prototype_dispersion(
     plt.savefig(filepath, dpi=300)
     plt.close()
 
-def draw_prototype_dispersion_grid(
+def draw_prototype_dispersion(
     geometric_median_prototypes: torch.Tensor, id2label: dict, title: str, filepath: str
 ):
     geo_medians = geometric_median_prototypes.cpu().numpy()
@@ -64,7 +64,7 @@ def draw_prototype_dispersion_grid(
     plt.savefig(filepath)
     plt.close()
 
-def draw_prototype_alignment_grid(
+def draw_prototype_alignment(
     geometric_median_prototypes: torch.Tensor,
     weight_prototypes: torch.Tensor,
     id2label: dict,
@@ -90,7 +90,7 @@ def draw_prototype_alignment_grid(
     plt.savefig(filepath)
     plt.close()
 
-def draw_prototype_alignment(
+def draw_prototype_alignment_no_num(
     geometric_median_prototypes: torch.Tensor,
     weight_prototypes: torch.Tensor,
     id2label: dict,
@@ -144,10 +144,10 @@ def draw_umap(
 
     plt.figure(figsize=(6, 5))
 
-    # 先画正样本（Non-vul为灰色，其他为有颜色）
+    # 先画正样本（Non-vul 为灰色，其他为有颜色）
     unique_labels = sorted(set(pred_label_idx))
 
-    # 定义颜色：Non-vul为灰色，其他为tab10
+    # 定义颜色：Non-vul 为灰色，其他为 tab10
     colors = plt.cm.tab10(np.linspace(0, 1, len(unique_labels) - 1))
     color_map = {}
     idx = 0
@@ -170,7 +170,7 @@ def draw_umap(
         edgecolors="none",
     )
 
-    # 先画正样本（非Non-vul）
+    # 先画正样本（非 Non-vul）
     for label in unique_labels:
         if label != 0:
             mask = np.array(pred_label_idx) == label

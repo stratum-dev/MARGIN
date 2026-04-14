@@ -1,7 +1,6 @@
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-
 class CodeDataset(Dataset):
     def __init__(self, backbone: str, hf_dataset: str, max_length: int):
         self.dataset = hf_dataset

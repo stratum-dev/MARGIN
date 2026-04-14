@@ -48,13 +48,14 @@ class MARGINModel(nn.Module):
         outputs = self.roberta(input_ids=input_ids, attention_mask=attention_mask)
         features = outputs.last_hidden_state[:, 0, :]  # [B, D]
         features = F.normalize(features, p=2, dim=1)  # [B, D]
-        cos_theta = torch.matmul(features, self.weight_prototypes.t())  # [B, C]
+        weight = F.normalize(self.weight_prototypes, p=2, dim=1)
+        cos_theta = torch.matmul(features, weight.t())  # [B, C]
         if return_features:
             return cos_theta, features
         return cos_theta
 
     def get_weight_prototypes(self):
-        """返回归一化的weight prototypes"""
+        """返回归一化的 weight prototypes"""
         return F.normalize(self.weight_prototypes, p=2, dim=1)
 
 
@@ -83,7 +84,7 @@ class MARGINLossHead(nn.Module):
         """
         kappas: [C]
         mean_prototypes: [C, D]
-        返回:
+        返回：
             margins: [C]
             scales: [C]
         """
@@ -124,6 +125,56 @@ class MARGINLossHead(nn.Module):
 
         return margins, scales
 
+    def forward(self, cos_theta, label_idxs):
+        B, C = cos_theta.shape
+        device = cos_theta.device
+        cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
+        # [B]
+        margins_batch = self.margins[label_idxs]
+        cos_m = torch.cos(margins_batch)
+        sin_m = torch.sin(margins_batch)
+        # 只取 GT 类 logits
+        target_cos = cos_theta[torch.arange(B, device=device), label_idxs]
+        target_sin = torch.sqrt(
+            torch.clamp(1.0 - target_cos**2, min=1e-7)
+        )
+        # ArcFace:
+        target_cos_margin = target_cos * cos_m - target_sin * sin_m
+        # 替换 GT logits
+        output = cos_theta.clone()
+        output[torch.arange(B, device=device), label_idxs] = target_cos_margin
+        # per-class scale
+        output = output * self.scales.unsqueeze(0)
+        loss = F.cross_entropy(output, label_idxs)
+        return loss
+
+    # def forward(self, cos_theta, label_idxs):
+    #     B, C = cos_theta.shape
+
+    #     # ✅ margins 按标签取（每个样本一个 margin）
+    #     margins_batch = self.margins[label_idxs]  # [B]
+
+    #     cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
+
+    #     cos_m = torch.cos(margins_batch)
+    #     sin_m = torch.sin(margins_batch)
+
+    #     sin_theta = torch.sqrt(torch.clamp(1 - cos_theta**2, min=1e-7))
+
+    #     cos_theta_plus_m = cos_theta * cos_m.unsqueeze(1) - sin_theta * sin_m.unsqueeze(
+    #         1
+    #     )
+
+    #     one_hot = F.one_hot(label_idxs, C).float()
+
+    #     output = cos_theta * (1 - one_hot) + cos_theta_plus_m * one_hot
+
+    #     # self.scales: [C] → unsqueeze(0): [1, C] → 广播到 [B, C]
+    #     output = output * self.scales.unsqueeze(0)
+
+    #     loss = F.cross_entropy(output, label_idxs)
+    #     return loss
+
     # def forward(self, cos_theta, label_idxs):
     #     B, C = cos_theta.shape
 
@@ -147,29 +198,3 @@ class MARGINLossHead(nn.Module):
     #     loss = F.cross_entropy(output, label_idxs)
     #     return loss
 
-    def forward(self, cos_theta, label_idxs):
-        B, C = cos_theta.shape
-
-        # ✅ margins 按标签取（每个样本一个 margin）
-        margins_batch = self.margins[label_idxs]  # [B]
-
-        cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
-
-        cos_m = torch.cos(margins_batch)
-        sin_m = torch.sin(margins_batch)
-
-        sin_theta = torch.sqrt(torch.clamp(1 - cos_theta**2, min=1e-7))
-
-        cos_theta_plus_m = cos_theta * cos_m.unsqueeze(1) - sin_theta * sin_m.unsqueeze(
-            1
-        )
-
-        one_hot = F.one_hot(label_idxs, C).float()
-
-        output = cos_theta * (1 - one_hot) + cos_theta_plus_m * one_hot
-
-        # self.scales: [C] → unsqueeze(0): [1, C] → 广播到 [B, C]
-        output = output * self.scales.unsqueeze(0)
-
-        loss = F.cross_entropy(output, label_idxs)
-        return loss
