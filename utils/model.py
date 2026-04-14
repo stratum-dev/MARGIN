@@ -142,6 +142,7 @@ class MARGINLossHead(nn.Module):
         target_cos_margin = target_cos * cos_m - target_sin * sin_m
         # 替换 GT logits
         output = cos_theta.clone()
+        target_cos_margin = target_cos_margin.to(output.dtype)
         output[torch.arange(B, device=device), label_idxs] = target_cos_margin
         # per-class scale
         output = output * self.scales.unsqueeze(0)
