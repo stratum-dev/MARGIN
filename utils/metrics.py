@@ -122,108 +122,122 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
 
     metrics["global_macro"]["fnr"] = float(np.mean(fnr_list))
     metrics["global_macro"]["fpr"] = float(np.mean(fpr_list))
-
+    
     # =========================================================================
-    # 3. Positive Macro (排除 Non-vul，关注正样本内部的区分能力)
+    # 3. Positive Macro (仅在真实正样本子集上评估 CWE 分类能力)
     # =========================================================================
     positive_label_idx = [l for l in all_label_idx if l != 0]
     metrics["positive_macro"] = {"per_class": {}}
-
+    
     if len(positive_label_idx) > 0:
-        # ---------------------------------------------------------------------
-        # 3.1 计算 Positive Macro MCC (修正版)
-        # ---------------------------------------------------------------------
-        # 逻辑：只在真实为正样本的数据中，计算每个类别的 One-vs-Rest MCC，然后取平均
-
-        # 1. 筛选出所有真实为正样本的索引
+    
+        # Step1: 仅保留真实为 positive 的样本
         pos_indices = [
-            i for i, y in enumerate(truth_label_idx) if y in positive_label_idx
+            i for i, y in enumerate(truth_label_idx)
+            if y in positive_label_idx
         ]
-
+    
         if len(pos_indices) > 0:
-            y_true_pos_subset = np.array([truth_label_idx[i] for i in pos_indices])
-            y_pred_pos_subset = np.array([pred_label_idx[i] for i in pos_indices])
-
+        
+            y_true_pos = np.array([truth_label_idx[i] for i in pos_indices])
+            y_pred_pos = np.array([pred_label_idx[i] for i in pos_indices])
+    
+            # ---------------------------------------------------------
+            # 3.1 Macro F1 / Precision / Recall
+            # ---------------------------------------------------------
+            metrics["positive_macro"]["f1"] = f1_score(
+                y_true_pos,
+                y_pred_pos,
+                average="macro",
+                labels=positive_label_idx,
+                zero_division=0,
+            )
+    
+            metrics["positive_macro"]["precision"] = precision_score(
+                y_true_pos,
+                y_pred_pos,
+                average="macro",
+                labels=positive_label_idx,
+                zero_division=0,
+            )
+    
+            metrics["positive_macro"]["recall"] = recall_score(
+                y_true_pos,
+                y_pred_pos,
+                average="macro",
+                labels=positive_label_idx,
+                zero_division=0,
+            )
+    
+            # ---------------------------------------------------------
+            # 3.2 Macro MCC
+            # ---------------------------------------------------------
             pos_mcc_scores = []
-
-            # 2. 对每个正样本类别计算 One-vs-Rest MCC
+    
             for label_idx in positive_label_idx:
-                # 二值化：当前类为 1，其他正样本类为 0
-                y_true_binary = (y_true_pos_subset == label_idx).astype(int)
-                y_pred_binary = (y_pred_pos_subset == label_idx).astype(int)
-
-                # 如果该类别在测试集中存在，则计算 MCC
+            
+                y_true_binary = (y_true_pos == label_idx).astype(int)
+                y_pred_binary = (y_pred_pos == label_idx).astype(int)
+    
                 if np.sum(y_true_binary) > 0:
-                    # 注意：这里不需要 zero_division 处理，因为 y_true 肯定有值
-                    # 但如果 y_pred 全为0或全为1，sklearn 可能会报错，需捕获
                     try:
-                        mcc = matthews_corrcoef(y_true_binary, y_pred_binary)
+                        mcc = matthews_corrcoef(
+                            y_true_binary,
+                            y_pred_binary,
+                        )
                         pos_mcc_scores.append(mcc)
                     except ValueError:
-                        # 处理极端情况（如预测结果只有一类）
                         pos_mcc_scores.append(0.0)
-                else:
-                    # 如果该类别没有真实样本，跳过或记为0
-                    pass
-
-            # 3. 取平均
+    
             metrics["positive_macro"]["mcc"] = (
-                float(np.mean(pos_mcc_scores)) if pos_mcc_scores else 0.0
+                float(np.mean(pos_mcc_scores))
+                if pos_mcc_scores else 0.0
             )
-        else:
-            metrics["positive_macro"]["mcc"] = 0.0
-
-        # ---------------------------------------------------------------------
-        # 3.2 计算其他指标 (F1, Precision, Recall) - 保持原有逻辑即可
-        # ---------------------------------------------------------------------
-        metrics["positive_macro"]["f1"] = f1_score(
-            truth_label_idx,
-            pred_label_idx,
-            average="macro",
-            labels=positive_label_idx,
-            zero_division=0,
-        )
-        metrics["positive_macro"]["precision"] = precision_score(
-            truth_label_idx,
-            pred_label_idx,
-            average="macro",
-            labels=positive_label_idx,
-            zero_division=0,
-        )
-        metrics["positive_macro"]["recall"] = recall_score(
-            truth_label_idx,
-            pred_label_idx,
-            average="macro",
-            labels=positive_label_idx,
-            zero_division=0,
-        )
-
-        # ---------------------------------------------------------------------
-        # 3.3 计算每个正例类别的详细指标
-        # ---------------------------------------------------------------------
-        for label_idx in positive_label_idx:
-            tp, fp, tn, fn = get_class_confusion_values(cm, label_idx)
-            label_name = idx2label[label_idx]
-            support = tp + fn
-
-            y_true_binary = [1 if y == label_idx else 0 for y in truth_label_idx]
-            y_pred_binary = [1 if y == label_idx else 0 for y in pred_label_idx]
-
-            if support > 0:
-                binary_metrics = compute_binary_metrics(y_true_binary, y_pred_binary)
-                metrics["positive_macro"]["per_class"][label_name] = {
-                    "tp": tp,
-                    "fp": fp,
-                    "tn": tn,
-                    "fn": fn,
+    
+            # ---------------------------------------------------------
+            # 3.3 Per-class Metrics
+            # ---------------------------------------------------------
+            cm_pos = confusion_matrix(
+                y_true_pos,
+                y_pred_pos,
+                labels=positive_label_idx
+            )
+    
+            for local_idx, label_idx in enumerate(positive_label_idx):
+            
+                tp = cm_pos[local_idx, local_idx]
+                fn = np.sum(cm_pos[local_idx, :]) - tp
+                fp = np.sum(cm_pos[:, local_idx]) - tp
+                tn = np.sum(cm_pos) - tp - fn - fp
+    
+                support = tp + fn
+    
+                y_true_binary = (y_true_pos == label_idx).astype(int)
+                y_pred_binary = (y_pred_pos == label_idx).astype(int)
+    
+                binary_metrics = compute_binary_metrics(
+                    y_true_binary,
+                    y_pred_binary
+                )
+    
+                metrics["positive_macro"]["per_class"][
+                    idx2label[label_idx]
+                ] = {
+                    "tp": int(tp),
+                    "fp": int(fp),
+                    "tn": int(tn),
+                    "fn": int(fn),
                     "support": int(support),
                     **binary_metrics,
                 }
-    else:
-        metrics["positive_macro"].update(
-            {"mcc": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
-        )
-
+    
+        else:
+            metrics["positive_macro"].update({
+                "mcc": 0.0,
+                "f1": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+            })
     # =========================================================================
     # 4. Binary 指标 (Non-vul (0) vs CWE-* (Rest))
     # =========================================================================
