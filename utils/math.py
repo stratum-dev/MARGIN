@@ -4,28 +4,29 @@ import torch.nn.functional as F
 from scipy.stats import chi2
 
 
-def compute_vmf_kappa(features, dim):
-    """
-    改进的 κ 估计，使用更稳定的数值方法
-    """
-    mu = F.normalize(features.mean(dim=0), dim=0)
-    R = (features @ mu).mean()
+def sigmoid(x):
+    """计算 sigmoid 并返回 Python 浮点数"""
+    x_tensor = torch.tensor([x], dtype=torch.float32)
+    y_tensor = torch.sigmoid(x_tensor)
+    return y_tensor.item()
 
-    # 防止边界情况
-    R = min(R, 0.999999)
 
-    # Sra (2012) 的改进近似，全范围更稳定
-    if R < 0.53:
-        kappa = R * (dim - R**2) / (1 - R**2)
-    elif R < 0.85:
-        kappa = R * (dim - 1) / (1 - R**2) * 0.8  # 经验修正
-    else:
-        # 高集中度：使用级数展开
-        kappa = (dim - 1) / (2 * (1 - R))
-        # 高阶修正项
-        kappa = kappa - (dim - 3) / (4 * kappa)
+def compute_vmf_kappa(features, prototype):
+    if features.size(0) == 0:
+        return 0.0
 
-    return torch.tensor(kappa)
+    features = torch.nn.functional.normalize(features, dim=1)
+    prototype = torch.nn.functional.normalize(prototype, dim=0)
+
+    cos_sim = torch.matmul(features, prototype)  # (N)
+    r = torch.mean(cos_sim).item()
+    d = features.size(1)
+    if r >= 1.0:
+        r = 0.999999
+    if r <= 0:
+        return 0.0
+    kappa = r * (d - r * r) / (1 - r * r)
+    return max(kappa, 1e-6)
 
 
 def compute_margin(
@@ -33,25 +34,30 @@ def compute_margin(
     count_i: int,
     kappa_i: float,
     dim: int,
+    max_class_counts: int,
     alpha: float = 0.95,
 ):
     """
-    Geometric margin:
-    spherical cap angle - Voronoi cone angle
+    Geometric margin with frequency-aware lower bound:
+    margin = max(0, max(theta_vmf, theta_freq) - theta_voronoi)
     """
 
-    # predictive uncertainty
+    # predictive uncertainty (confidence level)
     q = chi2.ppf(alpha, df=dim - 1)
 
-    kappa_i_eff = kappa_i * count_i / (count_i + 1)
-
+    # ---- vMF-based uncertainty（类内结构 + 样本数）----
+    kappa_i_eff = kappa_i
     theta_vmf = math.sqrt(q / kappa_i_eff)
 
-    # ETF Voronoi cone angle
+    # ---- frequency-induced lower bound（采样分辨率极限）----
+    theta_freq = 0.5 * sigmoid(-count_i / math.sqrt(max_class_counts))
+
+    # ---- ETF Voronoi cone angle（类间分离）----
     theta_voronoi_cell = 0.5 * math.acos(-1 / (n - 1))
 
-    margin = max(0, theta_vmf - theta_voronoi_cell)
-    # return 0.3
+    # ---- final margin ----
+    margin = max(theta_freq, theta_vmf - theta_voronoi_cell)
+
     return margin
 
 
@@ -116,37 +122,29 @@ def compute_pairwise_margin(
     return margin
 
 
-def compute_geometric_median(features, max_iter, tol=1e-5):
+def compute_geometric_median(
+    X: torch.Tensor,
+    max_iter: int = 100,
+    eps: float = 1e-6,
+) -> torch.Tensor:
     """
-    在单位超球面上计算几何中位数
-    features: [N, D] 已归一化的特征
-    weights: [N] 可选权重
-    返回: [D] 几何中位数（已归一化）
+    球面上的几何中位数（Weiszfeld + 投影）
+
+    X: [N, D]，已 L2 normalize
     """
-    initial_prototypes = torch.ones(features.shape[0], device=features.device)
 
-    # 初始化为均值
-    median = torch.sum(features * initial_prototypes.unsqueeze(1), dim=0) / torch.sum(
-        initial_prototypes
-    )
-    median = F.normalize(median.unsqueeze(0), p=2, dim=1).squeeze(0)
-
+    # ✅ 初始化也要在球面上
+    y = F.normalize(X.mean(dim=0), dim=0)
     for _ in range(max_iter):
-        # 计算球面距离 (余弦相似度转角度)
-        cos_sim = torch.matmul(features, median)
-        cos_sim = torch.clamp(cos_sim, -1.0, 1.0)
-        distances = torch.acos(cos_sim) + 1e-8
-
-        # 球面上的Weiszfeld算法
-        w = initial_prototypes / distances
-        new_median = torch.sum(features * w.unsqueeze(1), dim=0) / torch.sum(w)
-        new_median = F.normalize(new_median.unsqueeze(0), p=2, dim=1).squeeze(0)
-
-        # 检查收敛
-        diff = 1 - torch.dot(median, new_median)  # 余弦距离
-        median = new_median
-
-        if diff < tol:
+        dist = torch.norm(X - y, dim=1)
+        # ✅ 防止除零
+        dist = torch.clamp(dist, min=eps)
+        inv_dist = 1.0 / dist
+        y_new = (X * inv_dist[:, None]).sum(dim=0) / inv_dist.sum()
+        # ✅ 投影回单位球（关键）
+        y_new = F.normalize(y_new, dim=0) # 这里的 dim 是不是写错方向了
+        # ✅ 收敛判断
+        if torch.norm(y - y_new) < eps:
             break
-
-    return median
+        y = y_new
+    return y

@@ -7,6 +7,7 @@ from utils.metrics import (
     compute_etf_metrics,
     compute_statistics_metrics,
 )
+import torch.nn.functional as F
 from utils.model import MARGINModel
 
 
@@ -24,22 +25,30 @@ def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, devic
 
     with torch.no_grad():
         pbar = tqdm(dataloader, desc=title, leave=False)
+
         for batch in pbar:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             label_idxs = batch["label_idx"].to(device)
 
-            # 使用几何中位数原型进行分类
-            _, features = model(input_ids, attention_mask, return_features=True)
-
-            # 计算与几何中位数原型的余弦相似度
-            sim = torch.matmul(features, model.current_geometric_median_prototypes.t())
-            preds = torch.argmax(sim, dim=1)
-
-            # 计算loss（用于早停）
+            # ✅ 一次 forward
             with torch.autocast(device):
-                cos_theta = model(input_ids, attention_mask)
-                loss = model.loss_head(cos_theta, label_idxs)
+                cos_theta, features = model(
+                    input_ids, attention_mask, return_features=True
+                )
+
+            # ✅ 强制单位球
+            features = F.normalize(features, dim=1)
+            prototypes = F.normalize(
+                model.current_geometric_median_prototypes, dim=1
+            )
+
+            # ✅ prototype 分类
+            logits = torch.matmul(features, prototypes.t())
+            preds = torch.argmax(logits, dim=1)
+
+            # ✅ loss（监控用）
+            loss = model.loss_head(cos_theta, label_idxs)
 
             total_loss += loss.item()
             num_batches += 1

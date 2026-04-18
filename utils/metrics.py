@@ -23,14 +23,6 @@ from sklearn.preprocessing import normalize
 
 # ==================== 评估指标计算 ====================
 def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: dict):
-    import numpy as np
-    from sklearn.metrics import (
-        f1_score,
-        precision_score,
-        recall_score,
-        matthews_corrcoef,
-        accuracy_score,
-    )
 
     all_label_idx = list(range(len(idx2label)))
     metrics = {}
@@ -115,12 +107,14 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
     metrics["global_macro"]["fpr"] = float(np.mean(fpr_list))
 
     # ===============================
-    # POSITIVE MACRO
-    # 从 global_macro 中提取正类指标再平均
+    # POSITIVE MACRO (Oracle L2)
+    # 只在 GT vuln 样本上评估 CWE 分类能力
     # ===============================
-    positive_label_idx = [l for l in all_label_idx if l != 0]
-
-    if len(positive_label_idx) > 0:
+    positive_indices = [i for i, y in enumerate(truth_label_idx) if y != 0]
+    positive_label_idx = list(range(1, len(idx2label)))
+    if len(positive_indices) > 0:
+        y_true_pos = [truth_label_idx[i] for i in positive_indices]
+        y_pred_pos = [pred_label_idx[i] for i in positive_indices]
 
         pos_precisions = []
         pos_recalls = []
@@ -132,14 +126,42 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
         for c in positive_label_idx:
             label_name = idx2label[c]
 
-            cls_metrics = metrics["global_macro"]["per_class"][label_name]
+            # OVA on filtered data
+            y_true_bin = [1 if y == c else 0 for y in y_true_pos]
+            y_pred_bin = [1 if y == c else 0 for y in y_pred_pos]
 
-            per_class_metrics[label_name] = cls_metrics
+            tp = sum(1 for t, p in zip(y_true_bin, y_pred_bin) if t == 1 and p == 1)
+            fp = sum(1 for t, p in zip(y_true_bin, y_pred_bin) if t == 0 and p == 1)
+            fn = sum(1 for t, p in zip(y_true_bin, y_pred_bin) if t == 1 and p == 0)
+            tn = sum(1 for t, p in zip(y_true_bin, y_pred_bin) if t == 0 and p == 0)
 
-            pos_precisions.append(cls_metrics["precision"])
-            pos_recalls.append(cls_metrics["recall"])
-            pos_f1s.append(cls_metrics["f1"])
-            pos_mccs.append(cls_metrics["mcc"])
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1 = (
+                2 * precision * recall / (precision + recall)
+                if (precision + recall) > 0
+                else 0.0
+            )
+
+            mcc = matthews_corrcoef(y_true_bin, y_pred_bin)
+            mcc = 0.0 if np.isnan(mcc) else float(mcc)
+
+            per_class_metrics[label_name] = {
+                "tp": tp,
+                "fp": fp,
+                "tn": tn,
+                "fn": fn,
+                "support": int(tp + fn),
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "mcc": mcc,
+            }
+
+            pos_precisions.append(precision)
+            pos_recalls.append(recall)
+            pos_f1s.append(f1)
+            pos_mccs.append(mcc)
 
         metrics["positive_macro"] = {
             "precision": float(np.mean(pos_precisions)),

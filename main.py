@@ -30,11 +30,11 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==================== 常量配置区 ====================
 # 数据配置
 DATASET_NAME = "codemetic/MARGIN"
-DATASET_SUBSET = "megavul"  # 可选其他 subset
+DATASET_SUBSET = "bigvul"  # 可选其他 subset
 MAX_LENGTH = 512
 
 # 模型配置
-MODEL_NAME = "Salesforce/codet5-base"
+MODEL_NAME = "microsoft/unixcoder-base"
 EMBEDDING_DIM = 768  # graphcodebert-base 的维度
 
 # 训练配置
@@ -88,7 +88,7 @@ class Trainer:
         self.patience_counter = 0
         self.best_model_state = None
 
-    def train_epoch(self, dataloader, epoch, geometric_median_max_iter=100):
+    def train_epoch(self, dataloader, epoch):
         self.model.train()
         total_loss = 0.0
         num_batches = 0
@@ -154,14 +154,12 @@ class Trainer:
             mean_prototypes_list.append(mean_proto)
 
             # Geometric Median Prototype
-            geom_median_proto = compute_geometric_median(
-                feats_tensor_norm, max_iter=geometric_median_max_iter
-            )
+            geom_median_proto = compute_geometric_median(feats_tensor_norm)
             geom_median_proto = F.normalize(geom_median_proto, dim=0)
             geom_median_prototypes_list.append(geom_median_proto)
 
             # Kappa (复用上面的 feats_tensor_norm)
-            kappa = compute_vmf_kappa(feats_tensor_norm, D)
+            kappa = compute_vmf_kappa(feats_tensor_norm, mean_proto)
             kappas_list.append(kappa)
 
         # 拼成 [C, D] 张量 (注意维度顺序，通常类别在前更方便索引)
@@ -173,9 +171,8 @@ class Trainer:
             geom_median_prototypes_list, dim=0
         ).to(DEVICE)
 
-        self.model.current_kappas = torch.stack(kappas_list).to(DEVICE)  # [C]
         self.model.class_counts = torch.tensor(class_counts_list).to(DEVICE)  # [C]
-        self.model.current_kappas = torch.stack(kappas_list).to(DEVICE)  # [C]
+        self.model.current_kappas = torch.tensor(kappas_list).to(DEVICE)  # [C]
 
         # 我明明在这里面更新了 params 自适应参数
         self.model.loss_head.update_adaptive_params(
@@ -212,7 +209,7 @@ class Trainer:
             all_raw_labels,
             avg_loss,
         ) = evaluate_model(
-            self.model.eval(), dataloader, f"Epoch {epoch} Evaluating", DEVICE
+            self.model, dataloader, f"Epoch {epoch} Evaluating", DEVICE
         )
 
         classification_metrics = metrics["classification_metrics"]
@@ -291,7 +288,7 @@ class Trainer:
         # 2. Weight prototype 与 Geometric median prototype 相似度热力图
         draw_prototype_alignment(
             self.model.current_geometric_median_prototypes,
-            self.model.get_weight_prototypes(),
+            self.model.get_norm_weight_prototypes(),
             self.model.id2label,
             f"Weight vs Geometric Median Prototype Similarity (%) - Epoch {epoch}",
             os.path.join(
