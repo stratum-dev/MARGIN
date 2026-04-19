@@ -44,11 +44,15 @@ def draw_prototype_dispersion_no_num(
 def draw_prototype_dispersion(
     geometric_median_prototypes: torch.Tensor, id2label: dict, title: str, filepath: str
 ):
+    # 1. 数据预处理
     geo_medians = geometric_median_prototypes.cpu().numpy()
     sim_matrix = np.matmul(geo_medians, geo_medians.T)
     sim_matrix = sim_matrix * 100
     mask = np.triu(np.ones_like(sim_matrix, dtype=bool), k=1)
-    plt.figure(figsize=(10, 8))
+    n = len(id2label)
+    size = max(6, n * 0.5)
+    # 2. 创建正方形画布
+    plt.figure(figsize=(size, size), constrained_layout=True)
     sns.heatmap(
         sim_matrix,
         annot=True,
@@ -57,12 +61,18 @@ def draw_prototype_dispersion(
         cmap="viridis",
         vmin=-100,
         vmax=100,
-        xticklabels=[id2label[i] for i in range(len(id2label))],
-        yticklabels=[id2label[i] for i in range(len(id2label))],
+        xticklabels=[id2label[i] for i in range(n)],
+        yticklabels=[id2label[i] for i in range(n)],
+        cbar_kws={"label": "Similarity (%)"},
+        square=True,
     )
-    plt.title(title)
-    plt.tight_layout()
-    plt.savefig(filepath)
+    # 标题设置：增加 pad 让标题离图表远一点
+    plt.title(title, pad=20)
+    # 调整标签旋转
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+    # 3. 保存设置：bbox_inches='tight' 是关键，防止标题被切
+    plt.savefig(filepath, bbox_inches="tight")
     plt.close()
 
 
@@ -76,20 +86,31 @@ def draw_prototype_alignment(
     weight_protos = weight_prototypes.detach()
     sim_matrix = torch.matmul(geometric_median_prototypes.detach(), weight_protos.t())
     sim_matrix = (sim_matrix * 100).cpu().numpy()
-    plt.figure(figsize=(10, 8))
+
+    n = len(id2label)
+    size = max(6, n * 0.5)
+    # 2. 创建正方形画布
+    plt.figure(figsize=(size, size), constrained_layout=True)
     sns.heatmap(
         sim_matrix,
         annot=True,
         fmt=".0f",
-        cmap="coolwarm",
+        cmap="viridis",
         vmin=-100,
         vmax=100,
-        xticklabels=[f"W-{id2label[i]}" for i in range(len(id2label))],
-        yticklabels=[f"G-{id2label[i]}" for i in range(len(id2label))],
+        xticklabels=[f"W-{id2label[i]}" for i in range(n)],
+        yticklabels=[f"G-{id2label[i]}" for i in range(n)],
+        cbar_kws={"label": "Similarity (%)"},
+        square=True,  # 强制热力图单元格为正方形
     )
-    plt.title(title)
-    plt.tight_layout()
-    plt.savefig(filepath)
+
+    plt.title(title, pad=20)
+    # 调整标签旋转
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+
+    # 同样加上 bbox_inches='tight'
+    plt.savefig(filepath, bbox_inches="tight")
     plt.close()
 
 

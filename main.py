@@ -30,11 +30,15 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==================== 常量配置区 ====================
 # 数据配置
 DATASET_NAME = "codemetic/MARGIN"
-DATASET_SUBSET = "megavul"  # 可选其他 subset
+DATASET_SUBSET = "reposvul"  # 可选其他 subset
 MAX_LENGTH = 512
 
 # 模型配置
-MODEL_NAME = "Salesforce/codet5-base"  # 可选其他 backbone
+MODEL_NAME = "microsoft/unixcoder-base-nine"  # 可选其他 backbone
+# microsoft/graphcodebert-base
+# microsoft/unixcoder-base
+# microsoft/unixcoder-base-nine
+# Salesforce/codet5-base
 EMBEDDING_DIM = 768  # graphcodebert-base 的维度
 
 # 训练配置
@@ -278,7 +282,7 @@ class Trainer:
         draw_prototype_dispersion(
             self.model.current_geometric_median_prototypes,
             self.model.id2label,
-            f"Geometric Median Prototype Similarity (%) - Epoch {epoch}",
+            f"Epoch {epoch}",
             os.path.join(
                 PROTOTYPE_DISPERSION_OUTPUT_DIR, f"geo_median_sim_epoch_{epoch}.svg"
             ),
@@ -289,7 +293,7 @@ class Trainer:
             self.model.current_geometric_median_prototypes,
             self.model.get_norm_weight_prototypes(),
             self.model.id2label,
-            f"Weight vs Geometric Median Prototype Similarity (%) - Epoch {epoch}",
+            f"Epoch {epoch}",
             os.path.join(
                 PROTOTYPE_ALIGNMENT_OUTPUT_DIR, f"weight_geo_sim_epoch_{epoch}.svg"
             ),
