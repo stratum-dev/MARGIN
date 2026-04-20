@@ -30,7 +30,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==================== 常量配置区 ====================
 # 数据配置
 DATASET_NAME = "codemetic/MARGIN"
-DATASET_SUBSET = "reposvul"  # 可选其他 subset
+DATASET_SUBSET = "debug"  # 可选其他 subset
 MAX_LENGTH = 512
 
 # 模型配置
@@ -362,11 +362,11 @@ class Trainer:
                     break
             if self.best_model_state is not None:
                 best_epoch = self.best_model_state["epoch"]
-                best_mcc = self.best_model_state["val_global_mcc"]
-                log.print(f"🏆 Current Best: Epoch {best_epoch} | MCC {best_mcc:.4f}")
+                best_global_f1 = self.best_model_state["val_global_f1"]
+                log.print(f"🏆 Current Best: Epoch {best_epoch} | Global F1 {best_global_f1:.4f}")
             else:
                 log.print(
-                    f"🏆 Current Best: Epoch {epoch} | MCC {val_global_f1:.4f}"
+                    f"🏆 Current Best: Epoch {epoch} | Global F1 {val_global_f1:.4f}"
                 )  # 第一轮的情况
 
         if self.best_model_state is not None:
