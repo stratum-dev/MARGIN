@@ -118,10 +118,9 @@ class MARGINLossHead(nn.Module):
         max_val = kappas.max()
         kappas_norm = (kappas - min_val) / (max_val - min_val + 1e-8)
 
+        new_scales = self.base_scale * (2 - kappas_norm)
+        
         C = self.num_classes
-
-        new_scales = self.base_scale * (2 - kappas_norm **2)
-
         new_margins = torch.zeros(C, device=device)
         # betas = torch.zeros(C, device=device)
 
