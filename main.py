@@ -54,7 +54,7 @@ CONFIDENCE_ALPHA = 0.95  # α
 SEED = 42
 
 # 设备配置
-DEVICE = "cuda:0"
+DEVICE = "cuda:1"
 TIME_PREFIX = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 # 输出配置
 OUTPUT_DIR = f"./output/{DATASET_SUBSET}-{MODEL_NAME.split('/')[1]}-{TIME_PREFIX}"

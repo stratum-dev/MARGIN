@@ -115,24 +115,14 @@ class MARGINLossHead(nn.Module):
         u = torch.log(kappas)
         r = torch.softmax(u / C, dim=0) * C
         r = torch.flip(r, dims=[0])
-        new_scales = self.base_scale * r 
-        
-        new_margins = torch.zeros(C, device=device)
-        # betas = torch.zeros(C, device=device)
+        new_scales = self.base_scale * r
 
-        for i in range(C):
-            count_i = class_counts[i]
-            kappa_i = torch.clamp(kappas[i], min=1.0)
-
-            margin = compute_margin(
-                self.num_classes,
-                count_i,
-                kappa_i,
-                self.dim,
-                max_class_count,
-                self.alpha,
-            )
-            new_margins[i] = margin
+        new_margins = compute_margin(
+            kappas=kappas,
+            mean_prototypes=mean_prototypes,
+            dim=self.dim,
+            alpha=self.alpha,
+        )
 
         # ========================
         # Cosine UPDATE

@@ -30,33 +30,59 @@ def compute_vmf_kappa(features, prototype):
 
 
 def compute_margin(
-    n: int,
-    count_i: int,
-    kappa_i: float,
+    kappas: torch.Tensor,              # [C]
+    mean_prototypes: torch.Tensor,   # [C, D]
     dim: int,
-    max_class_counts: int,
     alpha: float = 0.95,
 ):
-    """
-    Geometric margin with frequency-aware lower bound:
-    margin = max(0, max(theta_vmf, theta_freq) - theta_voronoi)
-    """
+    device = kappas.device
+    C = kappas.shape[0]
 
-    # predictive uncertainty (confidence level)
+    # =========================
+    # 1. vMF uncertainty (vectorized)
+    # =========================
     q = chi2.ppf(alpha, df=dim - 1)
+    kappa_eff = torch.clamp(kappas, min=1.0)
+    theta_vmf = torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
 
-    # ---- vMF-based uncertainty（类内结构 + 样本数）----
-    kappa_i_eff = kappa_i
-    theta_vmf = math.sqrt(q / kappa_i_eff)
+    # =========================
+    # 2. ETF Voronoi (scalar)
+    # =========================
+    theta_voronoi = 0.5 * math.acos(-1 / (C - 1))
 
-    # ---- frequency-induced lower bound（采样分辨率极限）----
-    theta_freq = 0.5 * sigmoid(-count_i / math.sqrt(max_class_counts))
+    # =========================
+    # 3. prototype cosine matrix
+    # =========================
+    W = torch.nn.functional.normalize(mean_prototypes, p=2, dim=1)
+    cos_mat = torch.matmul(W, W.t())  # [C, C]
 
-    # ---- ETF Voronoi cone angle（类间分离）----
-    theta_voronoi_cell = 0.5 * math.acos(-1 / (n - 1))
+    # mask diagonal
+    eye = torch.eye(C, device=device, dtype=torch.bool)
+    cos_mat = cos_mat.masked_fill(eye, -1.0)
 
-    # ---- final margin ----
-    margin = max(theta_freq, theta_vmf - theta_voronoi_cell)
+    # =========================
+    # 4. min angle per class (vectorized)
+    # =========================
+    cos_mat = torch.clamp(cos_mat, -1 + 1e-7, 1 - 1e-7)
+    angle_mat = torch.acos(cos_mat)
+
+    theta_min, _ = torch.min(angle_mat, dim=1)  # [C]
+
+    # =========================
+    # 5. prototype dispersion
+    # =========================
+    theta_prototype_dispersion = torch.clamp(
+        theta_voronoi - theta_min,
+        min=0.0
+    )
+
+    # =========================
+    # 6. final margin (vectorized)
+    # =========================
+    margin = torch.maximum(
+        theta_prototype_dispersion,
+        theta_vmf - theta_voronoi
+    )
 
     return margin
 
