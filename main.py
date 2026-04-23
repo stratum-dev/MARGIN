@@ -34,7 +34,7 @@ DATASET_SUBSET = "bigvul"  # 可选其他 subset
 MAX_LENGTH = 512
 
 # 模型配置
-MODEL_NAME = "Salesforce/codet5-base"  # 可选其他 backbone
+MODEL_NAME = "microsoft/unixcoder-base"  # 可选其他 backbone
 # microsoft/graphcodebert-base
 # microsoft/unixcoder-base
 # microsoft/unixcoder-base-nine
@@ -42,14 +42,14 @@ MODEL_NAME = "Salesforce/codet5-base"  # 可选其他 backbone
 EMBEDDING_DIM = 768  # graphcodebert-base 的维度
 
 # 训练配置
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 LEARNING_RATE = 2e-5
 WEIGHT_DECAY = 0.01
 MAX_EPOCHS = 200
 EARLY_STOPPING_PATIENCE = MAX_EPOCHS
 
 # ArcFace & 球面配置
-BASE_SCALE = 30  # s
+BASE_SCALE = 10  # s
 CONFIDENCE_ALPHA = 0.95  # α
 SEED = 42
 

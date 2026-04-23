@@ -113,8 +113,9 @@ class MARGINLossHead(nn.Module):
         C = self.num_classes
         max_class_count = class_counts.max().item()
         u = torch.log(kappas)
-        r = torch.softmax(u / C, dim=0) * C  # mean = 1
-        new_scales = self.base_scale * r  # mean = s0这个代码，是Kappa越大，scale越大。但是我想反过来，仍然用这个方法 
+        r = torch.softmax(u / C, dim=0) * C
+        r = torch.flip(r, dims=[0])
+        new_scales = self.base_scale * r 
         
         new_margins = torch.zeros(C, device=device)
         # betas = torch.zeros(C, device=device)
