@@ -1,6 +1,4 @@
 from datetime import datetime
-
-import torch.nn.functional as F
 from datasets import load_dataset
 from utils.trainer import Trainer, TrainerConfig
 from utils.seed import set_seed
@@ -15,12 +13,15 @@ def main():
     DATASET_NAME = "codemetic/MARGIN"
     DATASET_SUBSET = "debug"
     BACKBONE_NAME = "microsoft/unixcoder-base"
-    
+
     # 超参数
     BASE_SCALE = 10
     CONFIDENCE_ALPHA = 0.95
 
     # 配置
+    SEED = 42
+    DEVICE = "cuda:1"
+
     config = TrainerConfig(
         output_dir=f"./output/{DATASET_SUBSET}-{BACKBONE_NAME.split('/')[1]}-{TIME_PREFIX}",
         batch_size=16,
@@ -28,10 +29,10 @@ def main():
         weight_decay=0.01,
         max_epochs=200,
         early_stopping_patience=200,
-        device="cuda:1",
+        device=DEVICE,
         umap_n_neighbors=15,
         umap_min_dist=0.1,
-        seed=42,
+        seed=SEED,
     )
 
     set_seed(config.seed)

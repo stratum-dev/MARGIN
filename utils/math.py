@@ -32,8 +32,9 @@ def compute_vmf_kappa(features, prototype):
 import torch
 import math
 
+
 def compute_margin(
-    kappas: torch.Tensor,   # [C]
+    kappas: torch.Tensor,  # [C]
     dim: int,
     alpha: float = 0.95,
 ):
@@ -69,10 +70,10 @@ def compute_margin(
     # 5. margin
     # =========================
     margin = torch.zeros_like(theta_vmf)
-    
+
     # outside
     margin[~inside_mask] = theta_vmf[~inside_mask] - theta_voronoi
-    
+
     # inside（修正后）
     margin[inside_mask] = theta_vmf[inside_mask] - theta_min
 

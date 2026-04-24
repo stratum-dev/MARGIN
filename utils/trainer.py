@@ -27,18 +27,18 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 class TrainerConfig:
     """训练器配置类"""
+
     def __init__(
         self,
-        batch_size:int,
-        learning_rate:int,
-        weight_decay:int,
-        max_epochs:int,
-        early_stopping_patience:int,
-        output_dir:str,
-        device:str,
-        umap_n_neighbors:int,
-        umap_min_dist:float,
-        
+        batch_size: int,
+        learning_rate: int,
+        weight_decay: int,
+        max_epochs: int,
+        early_stopping_patience: int,
+        output_dir: str,
+        device: str,
+        umap_n_neighbors: int,
+        umap_min_dist: float,
         # 其他配置
         seed=int,
     ):
@@ -58,28 +58,32 @@ class Trainer:
     def __init__(self, model: MARGINModel, config: TrainerConfig):
         self.config = config
         self.model = model.to(config.device)
-        
+
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), 
-            lr=config.learning_rate, 
-            weight_decay=config.weight_decay
+            self.model.parameters(),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
         )
         self.scaler = GradScaler()
 
         self.best_global_f1 = float("-inf")
         self.patience_counter = 0
         self.best_model_state = None
-        
+
         # 时间戳
         self.time_prefix = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     def setup_output_dirs(self):
         """设置输出目录"""
         self.umap_output_dir = os.path.join(self.config.output_dir, "umap")
-        self.prototype_alignment_output_dir = os.path.join(self.config.output_dir, "prototype-alignment")
-        self.prototype_dispersion_output_dir = os.path.join(self.config.output_dir, "prototype-dispersion")
+        self.prototype_alignment_output_dir = os.path.join(
+            self.config.output_dir, "prototype-alignment"
+        )
+        self.prototype_dispersion_output_dir = os.path.join(
+            self.config.output_dir, "prototype-dispersion"
+        )
         self.report_output_dir = os.path.join(self.config.output_dir, "report")
-        
+
         os.makedirs(self.config.output_dir, exist_ok=True)
         os.makedirs(self.umap_output_dir, exist_ok=True)
         os.makedirs(self.prototype_alignment_output_dir, exist_ok=True)
@@ -170,8 +174,12 @@ class Trainer:
                 geom_median_prototypes_list, dim=0
             ).to(self.config.device)
 
-            self.model.class_counts = torch.tensor(class_counts_list).to(self.config.device)  # [C]
-            self.model.current_kappas = torch.tensor(kappas_list).to(self.config.device)  # [C]
+            self.model.class_counts = torch.tensor(class_counts_list).to(
+                self.config.device
+            )  # [C]
+            self.model.current_kappas = torch.tensor(kappas_list).to(
+                self.config.device
+            )  # [C]
 
             # 我明明在这里面更新了 params 自适应参数
             self.model.loss_head.update_adaptive_params(
@@ -207,7 +215,9 @@ class Trainer:
             all_pred_label_idx,
             all_raw_labels,
             avg_loss,
-        ) = evaluate_model(self.model, dataloader, f"Epoch {epoch} Evaluating", self.config.device)
+        ) = evaluate_model(
+            self.model, dataloader, f"Epoch {epoch} Evaluating", self.config.device
+        )
 
         classification_metrics = metrics["classification_metrics"]
         clustering_metrics = metrics["clustering_metrics"]
@@ -278,7 +288,8 @@ class Trainer:
             self.model.id2label,
             f"Epoch {epoch}",
             os.path.join(
-                self.prototype_dispersion_output_dir, f"geo_median_sim_epoch_{epoch}.svg"
+                self.prototype_dispersion_output_dir,
+                f"geo_median_sim_epoch_{epoch}.svg",
             ),
         )
 
@@ -309,7 +320,7 @@ class Trainer:
         """训练主流程"""
         self.setup_output_dirs()
         log.set_log_file(os.path.join(self.config.output_dir, "train.log"))
-        
+
         for epoch in range(0, self.config.max_epochs + 1):
             log.print(f"\n{'='*50}")
             log.print(f"Epoch {epoch}/{self.config.max_epochs}")
@@ -359,7 +370,9 @@ class Trainer:
             if self.best_model_state is not None:
                 best_epoch = self.best_model_state["epoch"]
                 best_global_f1 = self.best_model_state["val_global_f1"]
-                log.print(f"🏆 Current Best: Epoch {best_epoch} | Global F1 {best_global_f1:.4f}")
+                log.print(
+                    f"🏆 Current Best: Epoch {best_epoch} | Global F1 {best_global_f1:.4f}"
+                )
             else:
                 log.print(
                     f"🏆 Current Best: Epoch {epoch} | Global F1 {val_global_f1:.4f}"
@@ -378,21 +391,21 @@ class Trainer:
     def save_checkpoint(self, filepath):
         """保存检查点"""
         checkpoint = {
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'best_global_f1': self.best_global_f1,
-            'patience_counter': self.patience_counter,
-            'best_model_state': self.best_model_state,
-            'config': self.config.__dict__
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "best_global_f1": self.best_global_f1,
+            "patience_counter": self.patience_counter,
+            "best_model_state": self.best_model_state,
+            "config": self.config.__dict__,
         }
         torch.save(checkpoint, filepath)
 
     def load_checkpoint(self, filepath):
         """加载检查点"""
         checkpoint = torch.load(filepath, map_location=self.config.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.best_global_f1 = checkpoint.get('best_global_f1', float('-inf'))
-        self.patience_counter = checkpoint.get('patience_counter', 0)
-        self.best_model_state = checkpoint.get('best_model_state', None)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.best_global_f1 = checkpoint.get("best_global_f1", float("-inf"))
+        self.patience_counter = checkpoint.get("patience_counter", 0)
+        self.best_model_state = checkpoint.get("best_model_state", None)
         # 可以选择恢复配置信息
