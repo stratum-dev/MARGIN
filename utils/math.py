@@ -69,12 +69,12 @@ def compute_margin(
     # 5. margin
     # =========================
     margin = torch.zeros_like(theta_vmf)
-
-    # outside: 削减
+    
+    # outside
     margin[~inside_mask] = theta_vmf[~inside_mask] - theta_voronoi
-
-    # inside: 向最小锥角收缩
-    margin[inside_mask] = theta_min - theta_vmf[inside_mask]
+    
+    # inside（修正后）
+    margin[inside_mask] = theta_vmf[inside_mask] - theta_min
 
     return margin
 

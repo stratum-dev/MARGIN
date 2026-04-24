@@ -5,10 +5,10 @@ from transformers import AutoTokenizer
 
 
 class CodeDataset(Dataset):
-    def __init__(self, backbone: str, hf_dataset: str, max_length: int):
+    def __init__(self, backbone: str, hf_dataset: str):
         self.dataset = hf_dataset
         self.tokenizer = AutoTokenizer.from_pretrained(backbone)
-        self.max_length = max_length
+        self.max_length = 512
         self.label2idx = {}
         self.idx2label = {}
         self._build_label_mapping()
