@@ -119,7 +119,7 @@ class MARGINLossHead(nn.Module):
 
         new_margins = compute_margin(
             kappas=kappas,
-            mean_prototypes=mean_prototypes,
+            # mean_prototypes=mean_prototypes,
             dim=self.dim,
             alpha=self.alpha,
         )

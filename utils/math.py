@@ -29,9 +29,11 @@ def compute_vmf_kappa(features, prototype):
     return max(kappa, 1e-6)
 
 
+import torch
+import math
+
 def compute_margin(
-    kappas: torch.Tensor,              # [C]
-    mean_prototypes: torch.Tensor,   # [C, D]
+    kappas: torch.Tensor,   # [C]
     dim: int,
     alpha: float = 0.95,
 ):
@@ -39,50 +41,40 @@ def compute_margin(
     C = kappas.shape[0]
 
     # =========================
-    # 1. vMF uncertainty (vectorized)
+    # 1. vMF uncertainty
     # =========================
     q = chi2.ppf(alpha, df=dim - 1)
     kappa_eff = torch.clamp(kappas, min=1.0)
     theta_vmf = torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
 
     # =========================
-    # 2. ETF Voronoi (scalar)
+    # 2. Voronoi angle
     # =========================
     theta_voronoi = 0.5 * math.acos(-1 / (C - 1))
 
     # =========================
-    # 3. prototype cosine matrix
+    # 3. inside mask
     # =========================
-    W = torch.nn.functional.normalize(mean_prototypes, p=2, dim=1)
-    cos_mat = torch.matmul(W, W.t())  # [C, C]
-
-    # mask diagonal
-    eye = torch.eye(C, device=device, dtype=torch.bool)
-    cos_mat = cos_mat.masked_fill(eye, -1.0)
+    inside_mask = theta_vmf <= theta_voronoi
 
     # =========================
-    # 4. min angle per class (vectorized)
+    # 4. 计算最小锥角（只在 Voronoi 内）
     # =========================
-    cos_mat = torch.clamp(cos_mat, -1 + 1e-7, 1 - 1e-7)
-    angle_mat = torch.acos(cos_mat)
-
-    theta_min, _ = torch.min(angle_mat, dim=1)  # [C]
-
-    # =========================
-    # 5. prototype dispersion
-    # =========================
-    theta_prototype_dispersion = torch.clamp(
-        theta_voronoi - theta_min,
-        min=0.0
-    )
+    if inside_mask.any():
+        theta_min = torch.min(theta_vmf[inside_mask])
+    else:
+        theta_min = theta_voronoi  # fallback（理论上不会常发生）
 
     # =========================
-    # 6. final margin (vectorized)
+    # 5. margin
     # =========================
-    margin = torch.maximum(
-        theta_prototype_dispersion,
-        theta_vmf - theta_voronoi
-    )
+    margin = torch.zeros_like(theta_vmf)
+
+    # outside: 削减
+    margin[~inside_mask] = theta_vmf[~inside_mask] - theta_voronoi
+
+    # inside: 向最小锥角收缩
+    margin[inside_mask] = theta_min - theta_vmf[inside_mask]
 
     return margin
 
