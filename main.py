@@ -105,7 +105,7 @@ def main():
     )
 
     set_seed(config.seed)
-
+    log.print(f"Training on dataset: {args.dataset_name}, subset: {args.dataset_subset}")
     log.print("Loading dataset...")
     # 使用 args 中的数据集名称
     dataset = load_dataset(args.dataset_name, args.dataset_subset)

@@ -32,9 +32,13 @@ def compute_vmf_kappa(features, prototype):
 import torch
 import math
 
+import torch
+import math
+from scipy.stats import chi2
 
 def compute_margin(
     kappas: torch.Tensor,  # [C]
+    mean_prototypes: torch.Tensor,  # [C, d] (assumed normalized)
     dim: int,
     alpha: float = 0.95,
 ):
@@ -54,30 +58,43 @@ def compute_margin(
     theta_voronoi = 0.5 * math.acos(-1 / (C - 1))
 
     # =========================
-    # 3. inside mask
+    # 3. prototype pairwise angle
     # =========================
-    inside_mask = theta_vmf <= theta_voronoi
+    # cosine similarity
+    cos_sim = torch.matmul(mean_prototypes, mean_prototypes.T)  # [C, C]
+    cos_sim = torch.clamp(cos_sim, -1 + 1e-6, 1 - 1e-6)
+
+    angles = torch.acos(cos_sim)  # [C, C]
+
+    # mask self
+    mask = torch.eye(C, dtype=torch.bool, device=device)
+    angles = angles.masked_fill(mask, float('inf'))
 
     # =========================
-    # 4. 计算最小锥角（只在 Voronoi 内）
+    # 4. compute overlap
     # =========================
-    if inside_mask.any():
-        theta_min = torch.min(theta_vmf[inside_mask])
-    else:
-        theta_min = theta_voronoi  # fallback（理论上不会常发生）
+    theta_i = theta_vmf.unsqueeze(1)  # [C,1]
+    theta_j = theta_vmf.unsqueeze(0)  # [1,C]
+
+    overlap = theta_i + theta_j - angles  # [C,C]
+
+    # only keep positive overlap
+    overlap = torch.clamp(overlap, min=0.0)
+
+    # take worst overlap per class
+    theta_overlap = overlap.max(dim=1).values  # [C]
 
     # =========================
-    # 5. margin
+    # 5. exceed (no overlap case)
     # =========================
-    margin = torch.zeros_like(theta_vmf)
+    theta_exceed = torch.clamp(theta_vmf - theta_voronoi, min=0.0)
 
-    # outside
-    margin[~inside_mask] = theta_vmf[~inside_mask] - theta_voronoi
+    # =========================
+    # 6. final margin
+    # =========================
+    margins = torch.max(theta_overlap, theta_exceed)
 
-    # inside（修正后）
-    margin[inside_mask] = theta_vmf[inside_mask] - theta_min
-
-    return margin
+    return margins
 
 
 def compute_convergence_coefficient(
