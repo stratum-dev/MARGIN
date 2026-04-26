@@ -7,6 +7,7 @@ from utils.dataset import CodeDataset
 from utils.math import (
     compute_pairwise_margin,
     compute_margin,
+    compute_scale,
     compute_convergence_coefficient,
 )
 from utils.logger import log
@@ -108,13 +109,7 @@ class MARGINLossHead(nn.Module):
         class_counts: torch.Tensor,
         mean_prototypes: torch.Tensor,
     ):
-        device = kappas.device
-        C = self.num_classes
-        max_class_count = class_counts.max().item()
-        u = torch.log(kappas)
-        r = torch.softmax(u / C, dim=0) * C
-        r = torch.flip(r, dims=[0])
-        new_scales = self.base_scale * r
+        new_scales = compute_scale(kappas=kappas, base_scale=self.base_scale)
 
         new_margins = compute_margin(
             kappas=kappas,

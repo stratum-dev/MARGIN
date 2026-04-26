@@ -28,6 +28,16 @@ def compute_vmf_kappa(features, prototype):
     kappa = r * (d - r * r) / (1 - r * r)
     return max(kappa, 1e-6)
 
+
+def compute_scale(kappas: torch.Tensor,base_scale:float):
+    u = torch.log(kappas)
+    C = kappas.shape[0]
+    r = torch.softmax(u / C, dim=0) * C
+    r = torch.flip(r, dims=[0])
+    new_scales = base_scale * r
+    return new_scales
+
+
 def compute_margin(
     kappas: torch.Tensor,  # [C]
     mean_prototypes: torch.Tensor,  # unused
@@ -69,8 +79,7 @@ def compute_margin(
     # 6. final margin（合法写法）
     # =========================
     margins = torch.maximum(
-        torch.maximum(theta_exceed, theta_fallback),
-        torch.zeros_like(theta_vmf)
+        torch.maximum(theta_exceed, theta_fallback), torch.zeros_like(theta_vmf)
     )
 
     return margins
