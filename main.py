@@ -54,9 +54,12 @@ def parse_args():
         "--max_epochs", type=int, default=200, help="Max Epochs (Default: 200)"
     )
     parser.add_argument(
+        "--max_checkpoints", type=int, default=3, help="Max Checkpoints (Default: 3)"
+    )
+    parser.add_argument(
         "--early_stopping_patience",
         type=int,
-        default=200,
+        default=30,
         help="Early Stop Patience (Default: 30)",
     )
 
@@ -95,6 +98,7 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         max_epochs=args.max_epochs,
+        max_checkpoints=args.max_checkpoints,
         early_stopping_patience=args.early_stopping_patience,
         device=args.device,
         umap_n_neighbors=args.umap_n_neighbors,

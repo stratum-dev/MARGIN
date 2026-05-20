@@ -1,3 +1,4 @@
+from collections import deque
 import json
 import os
 from os import path
@@ -34,6 +35,7 @@ class TrainerConfig:
         learning_rate: int,
         weight_decay: int,
         max_epochs: int,
+        max_checkpoints: int,
         early_stopping_patience: int,
         output_dir: str,
         device: str,
@@ -45,6 +47,7 @@ class TrainerConfig:
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.max_epochs = max_epochs
+        self.max_checkpoints = max_checkpoints
         self.output_dir = output_dir
         self.early_stopping_patience = early_stopping_patience
         self.device = device
@@ -291,10 +294,13 @@ class Trainer:
         self.setup_output_dirs()
         log.set_log_file(os.path.join(self.config.output_dir, "train.log"))
 
+        self.init_checkpoint_queue()
+
         for epoch in range(0, self.config.max_epochs + 1):
             log.print(f"\n{'='*50}")
             log.print(f"Epoch {epoch}/{self.config.max_epochs}")
             log.print(f"{'='*50}")
+
             g = torch.Generator()
             g.manual_seed(self.config.seed)
             train_loader = DataLoader(
@@ -316,24 +322,10 @@ class Trainer:
             val_global_f1 = val_metrics["classification_metrics"]["global_macro"]["f1"]
             log.print(f"Val Loss: {avg_val_loss:.4f}")
 
-            if val_global_f1 > self.best_global_f1:
-                self.best_global_f1 = val_global_f1
-                self.patience_counter = 0
-                self.best_model_state = {
-                    "epoch": epoch,
-                    "model_state_dict": self.model.state_dict(),
-                    "optimizer_state_dict": self.optimizer.state_dict(),
-                    "val_global_f1": val_global_f1,
-                }
-                log.print("Model improved.")
-            else:
-                self.patience_counter += 1
-                log.print(
-                    f"No improvement. Patience: {self.patience_counter}/{self.config.early_stopping_patience}"
-                )
-                if self.patience_counter >= self.config.early_stopping_patience:
-                    log.print(f"Early stopping triggered at epoch {epoch}")
-                    break
+            # 检查是否需要更新最佳模型
+            self.update_best_model(epoch, val_global_f1)
+
+            # 打印当前最优
             if self.best_model_state is not None:
                 best_epoch = self.best_model_state["epoch"]
                 best_global_f1 = self.best_model_state["val_global_f1"]
@@ -345,16 +337,53 @@ class Trainer:
                     f"🏆 Current Best: Epoch {epoch} | Global F1 {val_global_f1:.4f}"
                 )
 
+            # 早停判断
+            if self.patience_counter >= self.config.early_stopping_patience:
+                log.print(f"Early stopping triggered at epoch {epoch}")
+                break
+
         if self.best_model_state is not None:
             log.print(f"Loading best model from epoch {self.best_model_state['epoch']}")
             self.model.load_state_dict(self.best_model_state["model_state_dict"])
 
         return self.model
 
-    def get_best_model_state(self):
-        return self.best_model_state
+    def init_checkpoint_queue(self):
+        max_checkpoints = self.config.max_checkpoints
+        self.checkpoint_queue = deque(maxlen=max_checkpoints)
 
-    def save_checkpoint(self, filepath):
+    def update_best_model(self, epoch, val_global_f1):
+        if val_global_f1 > self.best_global_f1:
+            self.best_global_f1 = val_global_f1
+            self.patience_counter = 0
+            self.best_model_state = {
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "val_global_f1": val_global_f1,
+            }
+            log.print("Model improved.")
+
+            self.save_checkpoint_with_queue(epoch)
+        else:
+            self.patience_counter += 1
+            log.print(
+                f"No improvement. Patience: {self.patience_counter}/{self.config.early_stopping_patience}"
+            )
+
+    def save_checkpoint_with_queue(self, epoch):
+        checkpoint_path = os.path.join(self.config.output_dir, f"epoch_{epoch}.pth")
+        self.save_checkpoint_file(checkpoint_path)
+        self.checkpoint_queue.append(checkpoint_path)
+
+        while len(self.checkpoint_queue) > self.checkpoint_queue.maxlen:
+            oldest = self.checkpoint_queue.popleft()
+            if os.path.exists(oldest):
+                os.remove(oldest)
+                log.print(f"Removed oldest checkpoint: {oldest}")
+
+    def save_checkpoint_file(self, path):
+
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
@@ -363,4 +392,5 @@ class Trainer:
             "best_model_state": self.best_model_state,
             "config": self.config.__dict__,
         }
-        torch.save(checkpoint, filepath)
+        torch.save(checkpoint, path)
+        log.print(f"Checkpoint saved: {path}")

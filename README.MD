@@ -20,6 +20,9 @@ Start training with such command. Here is the example.
 python main.py \
 --dataset_subset bigvul \
 --backbone_name Salesforce/codet5-base \
+--max_epochs 200
+--max_checkpoints 3
+--early_stop_patience 30
 --base_scale 20 \
 --device cuda:0 \
 --batch_size 16 
