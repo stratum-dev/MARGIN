@@ -21,6 +21,7 @@ class MARGINModel(nn.Module):
         alpha: float,
         train_dataset: CodeDataset,
         val_dataset: CodeDataset,
+        test_dataset: CodeDataset,
         dropout_rate: float = 0.0,
     ):
         super().__init__()
@@ -48,6 +49,7 @@ class MARGINModel(nn.Module):
 
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
+        self.test_dataset = test_dataset
         self.label2id = train_dataset.label2idx
         self.id2label = train_dataset.idx2label
 
