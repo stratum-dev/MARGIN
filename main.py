@@ -120,7 +120,6 @@ def main():
 
     log.print(f"Loading tokenizer and model: {args.backbone_name}")
 
-    # 使用 args 中的模型名称
     train_dataset = CodeDataset(args.backbone_name, train_hf)
     val_dataset = CodeDataset(args.backbone_name, val_hf)
     test_dataset = CodeDataset(args.backbone_name, test_hf)
