@@ -5,10 +5,8 @@ import torch.nn.functional as F
 from transformers import AutoConfig, AutoModelForTextEncoding
 from utils.dataset import CodeDataset
 from utils.math import (
-    compute_pairwise_margin,
     compute_margin,
     compute_scale,
-    compute_convergence_coefficient,
 )
 from utils.logger import log
 
