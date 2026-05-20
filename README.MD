@@ -17,7 +17,12 @@ hf download codemetic/MARGIN --repo-type=dataset
 Start training with such command. Here is the example.
 
 ```bash
-python main.py --dataset_subset bigvul --backbone_name Salesforce/codet5-base --base_scale 20 --device cuda:0 --batch_size 16 
+python main.py \
+--dataset_subset bigvul \
+--backbone_name Salesforce/codet5-base \
+--base_scale 20 \
+--device cuda:0 \
+--batch_size 16 
 ```
 
 Also, you can lookup all parameter descriptions with
