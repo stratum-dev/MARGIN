@@ -13,7 +13,6 @@ from utils.math import (
 from utils.logger import log
 
 
-# ==================== 模型定义 ====================
 class MARGINModel(nn.Module):
     def __init__(
         self,
@@ -22,7 +21,7 @@ class MARGINModel(nn.Module):
         alpha: float,
         train_dataset: CodeDataset,
         val_dataset: CodeDataset,
-        dropout_rate: float = 0.0,  # 1. 新增参数
+        dropout_rate: float = 0.0,
     ):
         super().__init__()
         self.roberta_config = AutoConfig.from_pretrained(
@@ -61,7 +60,7 @@ class MARGINModel(nn.Module):
         outputs = self.roberta(input_ids=input_ids, attention_mask=attention_mask)
         hidden_states = outputs.hidden_states
         selected_layers = []
-        layers_to_concat = [-1]  # 选择哪些层的输出进行融合
+        layers_to_concat = [-1]
         for layer_idx in layers_to_concat:
             selected_layers.append(hidden_states[layer_idx])  # (B, L, D)
         stacked = torch.stack(selected_layers, dim=0)  # (N, B, L, D)
@@ -77,7 +76,6 @@ class MARGINModel(nn.Module):
         return cos_thetas
 
     def get_norm_weight_prototypes(self):
-        """返回归一化的 weight prototypes"""
         return F.normalize(self.weights.detach(), p=2, dim=1)
 
 

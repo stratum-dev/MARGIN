@@ -12,7 +12,6 @@ from utils.model import MARGINModel
 
 
 def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, device):
-    """评估模型"""
     model.eval()
 
     all_pred_label_idx = []
@@ -37,15 +36,12 @@ def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, devic
                     input_ids, attention_mask, return_features=True
                 )
 
-            # ✅ 强制单位球
             features = F.normalize(features, dim=1)
             prototypes = F.normalize(model.current_geometric_median_prototypes, dim=1)
 
-            # ✅ prototype 分类
             logits = torch.matmul(features, prototypes.t())
             preds = torch.argmax(logits, dim=1)
 
-            # ✅ loss（监控用）
             loss = model.loss_head(cos_theta, label_idxs)
 
             total_loss += loss.item()
@@ -60,7 +56,6 @@ def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, devic
     avg_loss = total_loss / num_batches
     all_features = torch.cat(all_features, dim=0)
 
-    # 计算指标
     classification_metrics = compute_classification_metrics(
         all_truth_label_idx, all_pred_label_idx, model.id2label
     )

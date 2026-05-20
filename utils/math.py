@@ -5,7 +5,6 @@ from scipy.stats import chi2
 
 
 def sigmoid(x):
-    """计算 sigmoid 并返回 Python 浮点数"""
     x_tensor = torch.tensor([x], dtype=torch.float32)
     y_tensor = torch.sigmoid(x_tensor)
     return y_tensor.item()
@@ -29,13 +28,13 @@ def compute_vmf_kappa(features, prototype):
     return max(kappa, 1e-6)
 
 
-def compute_scale(kappas: torch.Tensor,base_scale:float):
+def compute_scale(kappas: torch.Tensor, base_scale: float):
     u = torch.log(kappas)
     C = kappas.shape[0]
     r = torch.softmax(u / C, dim=0) * C
     r = torch.flip(r, dims=[0])
     new_scales = base_scale * r
-    return torch.full((C,), base_scale, dtype=torch.float32)
+    # return torch.full((C,), base_scale, dtype=torch.float32)
     return new_scales
 
 
@@ -47,8 +46,8 @@ def compute_margin(
 ):
     device = kappas.device
     C = kappas.shape[0]
-    
-    return torch.full((C,), 0, dtype=torch.float32)
+
+    # return torch.full((C,), 0, dtype=torch.float32)
 
     # =========================
     # 1. vMF uncertainty
@@ -103,50 +102,6 @@ def compute_convergence_coefficient(
     convergence_coeff = theta_voronoi_cell / (theta_vmf)
     convergence_coeff = max(0.0, min(1.0, convergence_coeff))
     return convergence_coeff
-
-
-def compute_pairwise_margin(
-    n: int,
-    mu_i: torch.Tensor,
-    count_i: int,
-    kappa_i: float,
-    mu_j: torch.Tensor,
-    count_j: int,
-    kappa_j: float,
-    dim: int,
-    alpha: float = 0.95,
-    temperature: float = 0.5,
-):
-    """
-    vMF predictive margin
-    """
-
-    q = chi2.ppf(alpha, df=dim - 1)
-
-    # predictive uncertainty
-    mu_i = F.normalize(mu_i, dim=0)
-    mu_j = F.normalize(mu_j, dim=0)
-
-    cos_theta = torch.dot(mu_i, mu_j).clamp(-1.0, 1.0)
-    theta_ij = torch.acos(cos_theta).item()
-
-    q = chi2.ppf(alpha, df=dim - 1)
-
-    theta_i = math.sqrt(q / kappa_i)
-    theta_j = math.sqrt(q / kappa_j)
-
-    sigma = math.sqrt(theta_i + theta_j)
-
-    # kappa_i_eff = kappa_i * count_i / (count_i + 1)
-    # kappa_j_eff = kappa_j * count_j / (count_j + 1)
-
-    # theta_i = math.sqrt(q / kappa_i_eff)
-    # theta_j = math.sqrt(q / kappa_j_eff)
-
-    # margin = max(0.0, theta_i + theta_j - theta_ij) * temperature
-    margin = sigma / (sigma + theta_ij)
-
-    return margin
 
 
 def compute_geometric_median(

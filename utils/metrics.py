@@ -4,7 +4,6 @@ import torch
 import torch.nn.functional as F
 from sklearn.metrics import (
     accuracy_score,
-    confusion_matrix,
     f1_score,
     matthews_corrcoef,
     precision_score,
@@ -21,7 +20,6 @@ from sklearn.metrics import (
 from sklearn.preprocessing import normalize
 
 
-# ==================== 评估指标计算 ====================
 def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: dict):
 
     all_label_idx = list(range(len(idx2label)))
@@ -188,7 +186,7 @@ def compute_clustering_metrics(truth_label_idx, pred_label_idx, features=None):
 
 
 def compute_etf_metrics(prototypes: torch.Tensor):
-    P = F.normalize(prototypes, dim=1)  # 确保归一化
+    P = F.normalize(prototypes, dim=1)
     K, d = P.shape
 
     # Gram matrix
