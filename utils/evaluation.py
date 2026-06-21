@@ -1,3 +1,10 @@
+"""
+Model evaluation loop.
+
+Runs a single pass over a :class:`DataLoader`, collects predictions and
+features, and computes classification / clustering / ETF / statistics metrics.
+"""
+
 import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -12,6 +19,31 @@ from utils.model import MARGINModel
 
 
 def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, device):
+    """
+    Evaluate *model* on *dataloader* and return comprehensive metrics.
+
+    Performs a full forward pass (inference only — no gradients), computes the
+    loss, and aggregates predictions, features, and raw labels across all
+    batches.  Then delegates to the metric-computation functions.
+
+    Parameters
+    ----------
+    model : MARGINModel
+        The model to evaluate (will be set to ``eval()`` mode).
+    dataloader : DataLoader
+        DataLoader yielding batches with keys ``input_ids``, ``attention_mask``,
+        ``label_idx``, ``raw_label``.
+    title : str
+        Description shown in the progress bar.
+    device : str or torch.device
+        Device to run evaluation on.
+
+    Returns
+    -------
+    tuple
+        ``(metrics_dict, all_features, all_truth_labels, all_pred_labels,
+        all_raw_labels, avg_loss)``
+    """
     model.eval()
 
     all_pred_label_idx = []
@@ -30,18 +62,21 @@ def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, devic
             attention_mask = batch["attention_mask"].to(device)
             label_idxs = batch["label_idx"].to(device)
 
-            # Single forward pass
+            # Forward pass: cosine logits + [CLS] features
             with torch.autocast(device):
                 cos_theta, features = model(
                     input_ids, attention_mask, return_features=True
                 )
 
+            # L2-normalize for cosine-space nearest-prototype classification
             features = F.normalize(features, dim=1)
             prototypes = F.normalize(model.current_geometric_median_prototypes, dim=1)
 
+            # Prediction = nearest geometric-median prototype
             logits = torch.matmul(features, prototypes.t())
             preds = torch.argmax(logits, dim=1)
 
+            # Loss computed via the model's own loss head (ArcFace-style)
             loss = model.loss_head(cos_theta, label_idxs)
 
             total_loss += loss.item()

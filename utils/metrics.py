@@ -1,3 +1,13 @@
+"""
+Evaluation metrics for vulnerability classification models.
+
+This module provides functions to compute:
+- Classification metrics (macro, per-class, binary) for multi-class vulnerability detection.
+- Clustering quality metrics (NMI, ARI, AMI, FMI, V-measure, angular silhouette).
+- ETF (Equiangular Tight Frame) structure metrics for prototype geometry analysis.
+- Statistical summary metrics for model parameters (kappa, margin, scale).
+"""
+
 import numpy as np
 import math
 import torch
@@ -21,14 +31,50 @@ from sklearn.preprocessing import normalize
 
 
 def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: dict):
+    """
+    Compute comprehensive classification metrics for multi-class vulnerability detection.
+
+    Produces three levels of metrics:
+    - ``global_macro``: Macro-averaged precision, recall, F1, MCC, accuracy, plus
+      per-class breakdown (TP/FP/TN/FN, support, precision, recall, F1, MCC).
+    - ``positive_macro``: Macro-averaged metrics over positive classes only
+      (class 0 — "non-vulnerable" — is excluded).
+    - ``binary``: Binary classification metrics treating class 0 as negative and
+      all other classes as positive.
+
+    Parameters
+    ----------
+    truth_label_idx : array-like of int
+        Ground-truth class indices.
+    pred_label_idx : array-like of int
+        Predicted class indices.
+    idx2label : dict[int, str]
+        Mapping from class index to human-readable label name.
+
+    Returns
+    -------
+    dict
+        Nested dictionary with keys ``"global_macro"``, ``"positive_macro"``,
+        and ``"binary"``.
+    """
 
     all_label_idx = list(range(len(idx2label)))
     metrics = {}
 
-    # ===============================
-    # Helper: OVA confusion (FULL)
-    # ===============================
+    # ------------------------------------------------------------------
+    # Helper: One-vs-All confusion matrix for a single class
+    # ------------------------------------------------------------------
     def ova_confusion(y_true, y_pred, class_idx):
+        """
+        Compute one-vs-all confusion table for a given class.
+
+        Treats ``class_idx`` as positive, all other classes as negative.
+
+        Returns
+        -------
+        tuple
+            (tp, fp, tn, fn, y_true_bin, y_pred_bin)
+        """
         y_true_bin = (np.array(y_true) == class_idx).astype(int)
         y_pred_bin = (np.array(y_pred) == class_idx).astype(int)
 
@@ -39,9 +85,9 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
 
         return tp, fp, tn, fn, y_true_bin, y_pred_bin
 
-    # ===============================
-    # GLOBAL MACRO (FULL MULTICLASS)
-    # ===============================
+    # ==================================================================
+    # GLOBAL MACRO: macro-averaged metrics across all classes
+    # ==================================================================
     metrics["global_macro"] = {
         "mcc": float(matthews_corrcoef(truth_label_idx, pred_label_idx)),
         "f1": float(
@@ -61,9 +107,11 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
         "per_class": {},
     }
 
+    # Collect per-class FNR/FPR for macro-averaging
     fnr_list, fpr_list = [], []
 
     for c in all_label_idx:
+        # One-vs-all confusion table for class c
         tp, fp, tn, fn, y_true_bin, y_pred_bin = ova_confusion(
             truth_label_idx, pred_label_idx, c
         )
@@ -74,7 +122,7 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
         fnr_list.append(fnr)
         fpr_list.append(fpr)
 
-        # binary metrics (consistent OVA)
+        # Binary metrics for this class (OVA view — class c vs rest)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (
@@ -104,9 +152,10 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
     metrics["global_macro"]["fnr"] = float(np.mean(fnr_list))
     metrics["global_macro"]["fpr"] = float(np.mean(fpr_list))
 
-    # ===============================
-    # POSITIVE MACRO (from global per_class)
-    # ===============================
+    # ==================================================================
+    # POSITIVE MACRO: macro-averaged metrics over positive classes only
+    # (excludes class 0 — the "non-vulnerable" / background class)
+    # ==================================================================
     positive_label_idx = list(range(1, len(idx2label)))
 
     pos_precisions = []
@@ -130,9 +179,10 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
         "mcc": float(np.mean(pos_mccs)),
     }
 
-    # ===============================
-    # BINARY (Non-vul vs Vul)
-    # ===============================
+    # ==================================================================
+    # BINARY: collapse all classes into "non-vulnerable" (class 0) vs
+    # "vulnerable" (any positive class)
+    # ==================================================================
     y_true_bin = [0 if y == 0 else 1 for y in truth_label_idx]
     y_pred_bin = [0 if y == 0 else 1 for y in pred_label_idx]
 
@@ -165,6 +215,28 @@ def compute_classification_metrics(truth_label_idx, pred_label_idx, idx2label: d
 
 
 def compute_clustering_metrics(truth_label_idx, pred_label_idx, features=None):
+    """
+    Compute clustering quality metrics comparing predicted vs ground-truth assignments.
+
+    Computes NMI, ARI, AMI, FMI, V-measure, and the angular (cosine) silhouette score.
+    Silhouette score requires at least 2 unique predicted labels; if fewer, it is set
+    to NaN.
+
+    Parameters
+    ----------
+    truth_label_idx : array-like of int
+        Ground-truth class indices.
+    pred_label_idx : array-like of int
+        Predicted cluster/class indices.
+    features : np.ndarray or torch.Tensor, optional
+        Feature vectors for silhouette computation. Expected shape ``(n_samples, d)``.
+
+    Returns
+    -------
+    dict
+        Keys: ``"nmi"``, ``"ari"``, ``"ami"``, ``"fmi"``, ``"v_measure"``,
+        ``"angular_silhouette_score"``.
+    """
     truth_label_idx = np.array(truth_label_idx)
     pred_label_idx = np.array(pred_label_idx)
 
@@ -179,7 +251,9 @@ def compute_clustering_metrics(truth_label_idx, pred_label_idx, features=None):
     )
     clustering_metrics["fmi"] = fowlkes_mallows_score(truth_label_idx, pred_label_idx)
     clustering_metrics["v_measure"] = v_measure_score(truth_label_idx, pred_label_idx)
+    # L2-normalize features for angular (cosine) distance
     features_normalized = normalize(features, norm="l2", axis=1)
+    # Silhouette score needs ≥2 clusters; guard against degenerate single-cluster case
     n_unique_labels = len(set(pred_label_idx))
     if n_unique_labels >= 2:
         angular_sh = silhouette_score(
@@ -192,43 +266,68 @@ def compute_clustering_metrics(truth_label_idx, pred_label_idx, features=None):
 
 
 def compute_etf_metrics(prototypes: torch.Tensor):
+    """
+    Measure how closely class prototypes follow an Equiangular Tight Frame (ETF) structure.
+
+    An ETF is a geometric configuration where K unit vectors in R^d are maximally
+    separated: all pairwise inner products equal -1/(K-1).  This function computes:
+
+    - Frobenius deviation of the Gram matrix from the ideal ETF Gram.
+    - Statistics of off-diagonal cosine similarities (variance, std, deviation from ideal).
+    - Angular deviation from the ideal ETF angle (radians).
+    - Eigenvalue statistics and condition number of the Gram matrix.
+
+    Parameters
+    ----------
+    prototypes : torch.Tensor
+        Prototype vectors of shape ``(K, d)`` where K is the number of classes.
+
+    Returns
+    -------
+    dict
+        Keys: ``"etf_error"``, ``"etf_error_norm"``, ``"cosine_variance"``,
+        ``"cosine_std"``, ``"avg_cosine_deviation"``, ``"max_cosine_deviation"``,
+        ``"avg_angle_deviation"``, ``"max_angle_deviation"``, ``"eig_var"``,
+        ``"eig_mean"``, ``"cond_num"``.
+    """
     P = F.normalize(prototypes, dim=1)
     K, d = P.shape
 
-    # Gram matrix
+    # Gram matrix: pairwise inner products between normalized prototypes
     G = P @ P.T
 
-    # 1. ETF ideal Gram
+    # 1. Frobenius error from the ideal ETF Gram matrix
+    #    Ideal: diag=1, off-diag=-1/(K-1)
     target = torch.full((K, K), -1 / (K - 1), device=P.device)
     target.fill_diagonal_(1)
     etf_error = torch.norm(G - target, p="fro").item()
-    etf_error_norm = etf_error / K  # Normalized
+    etf_error_norm = etf_error / K  # Per-class normalized error
 
-    # 2. Off-diagonal cosines
+    # 2. Extract off-diagonal cosine similarities
     mask = ~torch.eye(K, dtype=bool, device=P.device)
     cosines = G[mask]
 
-    # 3. Cosine variance / std
+    # 3. Dispersion of off-diagonal cosines
     cosine_variance = cosines.var().item()
     cosine_std = cosines.std().item()
 
-    # 4. Average cosine deviation from ETF ideal
+    # 4. Absolute deviation of cosines from the ideal ETF value
     avg_cosine_deviation = torch.mean(torch.abs(cosines - (-1 / (K - 1)))).item()
     max_cosine_deviation = torch.max(torch.abs(cosines - (-1 / (K - 1)))).item()
 
-    # 5. Average angle deviation (rad)
+    # 5. Angular deviation from the ideal ETF angle (radians)
     angles = torch.acos(cosines.clamp(-1, 1))
     etf_angle = math.acos(-1 / (K - 1))
     avg_angle_deviation = torch.mean(torch.abs(angles - etf_angle)).item()
     max_angle_deviation = torch.max(torch.abs(angles - etf_angle)).item()
 
-    # 6. Gram eigenvalue statistics
+    # 6. Eigenvalue statistics of the Gram matrix (non-zero only)
     eigvals = torch.linalg.eigvalsh(G)
     non_zero_eig = eigvals[eigvals > 1e-6]
     eig_var = non_zero_eig.var().item()
     eig_mean = non_zero_eig.mean().item()
 
-    # 7. Gram condition number
+    # 7. Gram matrix condition number (smallest → 0 means collapse)
     cond_num = torch.linalg.cond(G).item()
 
     return {
@@ -247,7 +346,27 @@ def compute_etf_metrics(prototypes: torch.Tensor):
 
 
 def compute_statistics_metrics(kappas, margins, scales, id2label):
+    """
+    Summarise per-class learnable parameters (kappa, margin, scale) of the loss head.
 
+    Parameters
+    ----------
+    kappas : torch.Tensor
+        Per-class concentration (kappa) parameters, shape ``(C,)``.
+    margins : torch.Tensor
+        Per-class angular margin parameters, shape ``(C,)``.
+    scales : torch.Tensor
+        Per-class scale parameters, shape ``(C,)``.
+    id2label : dict[int, str]
+        Mapping from class index to human-readable label name.
+
+    Returns
+    -------
+    dict
+        Nested dictionary with keys ``"per_class"`` (label → kappa/margin/scale dict)
+        and ``"summary"`` (mean and std of each parameter across classes).
+    """
+    # Move tensors to CPU for summary computation
     kappas = kappas.detach().cpu()
     margins = margins.detach().cpu()
     scales = scales.detach().cpu()

@@ -1,3 +1,13 @@
+"""
+Training loop and configuration for the MARGIN model.
+
+Provides:
+- :class:`TrainerConfig` — hyperparameter and runtime settings dataclass.
+- :class:`Trainer` — full training pipeline with per-epoch prototype estimation,
+  adaptive margin/scale updates, evaluation, visualisation, checkpointing,
+  and early stopping.
+"""
+
 from collections import deque
 import json
 import os
@@ -28,6 +38,31 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 
 class TrainerConfig:
+    """
+    Configuration container for the MARGIN trainer.
+
+    Attributes
+    ----------
+    batch_size : int
+    learning_rate : float
+    weight_decay : float
+    max_epochs : int
+    max_checkpoints : int
+        Maximum number of recent checkpoints to retain on disk.
+    early_stopping_patience : int
+        Epochs without improvement before stopping.
+    output_dir : str
+        Root directory for logs, checkpoints, and visualisations.
+    device : str
+    umap_n_neighbors : int
+    umap_min_dist : float
+    seed : int
+    backbone_name : str
+    dataset_name : str
+    dataset_subset : str
+    base_scale : float
+    alpha : float
+    """
 
     def __init__(
         self,
@@ -67,6 +102,29 @@ class TrainerConfig:
 
 
 class Trainer:
+    """
+    Full training pipeline for the MARGIN model.
+
+    Each epoch consists of:
+    1. **Training pass** — forward/backward with the current adaptive
+       margins/scales, collecting per-class features.
+    2. **Prototype estimation** — compute mean and geometric-median prototypes,
+       estimate vMF kappa per class.
+    3. **Parameter update** — recompute adaptive margins and scales from the
+       new statistics.
+    4. **Evaluation** — compute classification/clustering/ETF metrics on the
+       validation set, generate visualisations.
+    5. **Checkpointing & early stopping** — save best model, maintain a
+       bounded queue of recent checkpoints.
+
+    Parameters
+    ----------
+    model : MARGINModel
+        The model to train.
+    config : TrainerConfig
+        Hyperparameter and runtime configuration.
+    """
+
     def __init__(self, model: MARGINModel, config: TrainerConfig):
         self.config = config
         self.model = model.to(config.device)
@@ -85,6 +143,7 @@ class Trainer:
         self.time_prefix = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     def setup_output_dirs(self):
+        """Create output subdirectories for UMAP, prototype plots, and reports."""
         self.umap_output_dir = os.path.join(self.config.output_dir, "umap")
         self.prototype_alignment_output_dir = os.path.join(
             self.config.output_dir, "prototype-alignment"
@@ -101,6 +160,14 @@ class Trainer:
         os.makedirs(self.report_output_dir, exist_ok=True)
 
     def train_epoch(self, dataloader, epoch):
+        """
+        Run one training epoch.
+
+        Returns
+        -------
+        float
+            Average training loss over all batches.
+        """
         self.model.train()
         total_loss = 0.0
         num_batches = 0
@@ -137,6 +204,7 @@ class Trainer:
             for f, l in zip(features_cpu, labels_cpu):
                 feature_accumulator[int(l)].append(f)
 
+        # ---- Post-epoch: estimate per-class statistics ----
         D = features.shape[1]
         C = self.model.num_classes
 
@@ -148,17 +216,20 @@ class Trainer:
         with torch.no_grad():
             for label_idx in range(C):
                 feats = feature_accumulator[label_idx]
-                feats_tensor = torch.stack(feats, dim=0)  # [N, D]
+                feats_tensor = torch.stack(feats, dim=0)  # [N_c, D]
                 class_counts_list.append(len(feats))
                 feats_tensor_norm = F.normalize(feats_tensor, p=2, dim=1)
+
+                # Arithmetic mean prototype (L2-normalised)
                 mean_proto = F.normalize(feats_tensor_norm.mean(dim=0), dim=0)
                 mean_prototypes_list.append(mean_proto)
 
-                # Geometric Median Prototype
+                # Geometric median — robust to outliers
                 geom_median_proto = compute_geometric_median(feats_tensor_norm)
                 geom_median_proto = F.normalize(geom_median_proto, dim=0)
                 geom_median_prototypes_list.append(geom_median_proto)
 
+                # vMF concentration estimate
                 kappa = compute_vmf_kappa(feats_tensor_norm, mean_proto)
                 kappas_list.append(kappa)
 
@@ -193,6 +264,15 @@ class Trainer:
         return total_loss / num_batches
 
     def evaluate_epoch(self, dataloader, epoch, save_prefix="val"):
+        """
+        Evaluate on *dataloader*, log metrics, save JSON report, and
+        generate visualisations.
+
+        Returns
+        -------
+        tuple
+            ``(avg_loss, metrics_dict)``
+        """
         self.model.eval()
 
         start_time = time.time()
@@ -269,6 +349,10 @@ class Trainer:
         return avg_loss, metrics
 
     def visualize_epoch(self, features, truth_label_idx, epoch):
+        """
+        Generate and save UMAP, prototype-dispersion, and prototype-alignment
+        plots for the current epoch.
+        """
         draw_prototype_dispersion(
             self.model.current_geometric_median_prototypes,
             self.model.id2label,
@@ -301,6 +385,14 @@ class Trainer:
         )
 
     def train(self):
+        """
+        Run the full training loop over ``max_epochs`` epochs.
+
+        Returns
+        -------
+        MARGINModel
+            The model loaded with the best checkpoint (by validation F1).
+        """
         self.setup_output_dirs()
         log.set_log_file(os.path.join(self.config.output_dir, "train.log"))
 
@@ -311,6 +403,7 @@ class Trainer:
             log.print(f"Epoch {epoch}/{self.config.max_epochs}")
             log.print(f"{'='*50}")
 
+            # Build dataloaders with fixed seed for reproducibility
             g = torch.Generator()
             g.manual_seed(self.config.seed)
             train_loader = DataLoader(
@@ -325,14 +418,16 @@ class Trainer:
                 shuffle=False,
             )
 
+            # Phase 1: training (includes prototype estimation & margin update)
             train_loss = self.train_epoch(train_loader, epoch)
             log.print(f"Train Loss: {train_loss:.4f}")
 
+            # Phase 2: validation
             avg_val_loss, val_metrics = self.evaluate_epoch(val_loader, epoch)
             val_global_f1 = val_metrics["classification_metrics"]["global_macro"]["f1"]
             log.print(f"Val Loss: {avg_val_loss:.4f}")
 
-            # Check if best model needs to be updated
+            # Update best-model tracking and early stopping
             self.update_best_model(epoch, val_global_f1)
 
             # Print current best
@@ -347,7 +442,7 @@ class Trainer:
                     f"🏆 Current Best: Epoch {epoch} | Global F1 {val_global_f1:.4f}"
                 )
 
-            # Early stopping check
+            # Early stopping — stop if no improvement for `patience` consecutive epochs
             if self.patience_counter >= self.config.early_stopping_patience:
                 log.print(f"Early stopping triggered at epoch {epoch}")
                 break
@@ -359,9 +454,14 @@ class Trainer:
         return self.model
 
     def init_checkpoint_queue(self):
+        """Initialise the bounded FIFO queue for checkpoint rotation."""
         self.checkpoint_queue = deque()
 
     def update_best_model(self, epoch, val_global_f1):
+        """
+        Update best-model state if *val_global_f1* improves; otherwise
+        increment the patience counter.
+        """
         if val_global_f1 > self.best_global_f1:
             self.best_global_f1 = val_global_f1
             self.patience_counter = 0
@@ -381,6 +481,7 @@ class Trainer:
             )
 
     def save_checkpoint_with_queue(self, epoch):
+        """Save a checkpoint and evict the oldest one if the queue is full."""
         checkpoint_path = os.path.join(
             self.config.output_dir, "checkpoints", f"epoch_{epoch}.pth"
         )
@@ -394,6 +495,7 @@ class Trainer:
                 log.print(f"Removed oldest checkpoint: {oldest}")
 
     def save_checkpoint_file(self, path):
+        """Persist model, optimizer, config, and label mappings to *path*."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         checkpoint = {
             "model_state_dict": self.model.state_dict(),

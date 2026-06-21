@@ -316,6 +316,16 @@ def visualize_and_save(
 
 
 def main():
+    """
+    Interactive evaluation entry point.
+
+    Steps:
+    1. Select a training run from ``./output/``.
+    2. Choose a checkpoint (``.pth`` file).
+    3. Prompt for device, batch size, and random seed.
+    4. Reconstruct the model, load weights, and run test-set evaluation.
+    5. Save metrics JSON and visualisation SVGs.
+    """
     # ---- Step 1: select training run ----
     runs = get_immediate_subdirs(OUTPUT_ROOT)
     if not runs:

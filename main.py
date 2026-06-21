@@ -1,3 +1,11 @@
+"""
+MARGIN Model Training Entry Point.
+
+Parses CLI arguments, loads the HuggingFace dataset, builds the model and
+trainer, and launches the full training loop.  All hyperparameters are
+persisted to ``settings.json`` in the output directory for reproducibility.
+"""
+
 import argparse
 from datetime import datetime
 import json
@@ -11,6 +19,7 @@ from utils.logger import log
 
 
 def parse_args():
+    """Parse command-line arguments and return an ``argparse.Namespace``."""
     parser = argparse.ArgumentParser(description="MARGIN Model Training Script")
 
     parser.add_argument(
@@ -88,14 +97,20 @@ def parse_args():
 
 
 def main():
+    """
+    Main entry point: parse args → load data → build model → train.
 
+    Outputs are written to ``./output/{subset}-{backbone}-{timestamp}/``.
+    """
     args = parse_args()
 
+    # ---- Setup output directory and logging ----
     TIME_PREFIX = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     OUTPUT_DIR = f"./output/{args.dataset_subset}-{args.backbone_name.split('/')[1]}-{TIME_PREFIX}"
     SETTINGS_OUTPUT_PATH = os.path.join(OUTPUT_DIR, "settings.json")
     log.set_log_file(os.path.join(OUTPUT_DIR, "train.log"))
 
+    # ---- Build trainer configuration ----
     config = TrainerConfig(
         output_dir=OUTPUT_DIR,
         batch_size=args.batch_size,
@@ -127,8 +142,9 @@ def main():
     log.print(
         f"Training on dataset: {args.dataset_name}, subset: {args.dataset_subset}"
     )
-    log.print("Loading dataset...")
 
+    # ---- Load and prepare dataset ----
+    log.print("Loading dataset...")
     dataset = load_dataset(args.dataset_name, args.dataset_subset)
 
     train_hf = dataset["train"]
@@ -150,6 +166,7 @@ def main():
     log.print(f"Number of classes: {len(label2id)}")
     log.print(f"Label mapping: {label2id}")
 
+    # ---- Build model and launch training ----
     model = MARGINModel(
         backbone=args.backbone_name,
         base_scale=args.base_scale,

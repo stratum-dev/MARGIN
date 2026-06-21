@@ -1,3 +1,15 @@
+"""
+Visualisation utilities for prototype geometry and embedding UMAP plots.
+
+Functions
+---------
+- ``draw_prototype_dispersion`` / ``_no_num`` — heatmap of pairwise cosine
+  similarities between geometric-median prototypes.
+- ``draw_prototype_alignment`` / ``_no_num`` — cross-similarity heatmap between
+  learnable weight prototypes and geometric-median prototypes.
+- ``draw_umap`` — 2-D UMAP projection of learned embeddings, coloured by label.
+"""
+
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
@@ -11,6 +23,23 @@ def draw_prototype_dispersion_no_num(
     title: str,
     filepath: str,
 ):
+    """
+    Cosine similarity matrix of geometric-median prototypes (no annotations).
+
+    Uses ``imshow`` instead of ``heatmap`` — faster for large numbers of
+    classes but does not display numeric values.
+
+    Parameters
+    ----------
+    geometric_median_prototypes : torch.Tensor
+        Prototype matrix of shape ``(C, D)``.
+    id2label : dict
+        Class-index-to-label mapping.
+    title : str
+        Plot title.
+    filepath : str
+        Output file path (SVG recommended).
+    """
     geo = geometric_median_prototypes.cpu().numpy()
 
     # cosine similarity matrix
@@ -44,6 +73,23 @@ def draw_prototype_dispersion_no_num(
 def draw_prototype_dispersion(
     geometric_median_prototypes: torch.Tensor, id2label: dict, title: str, filepath: str
 ):
+    """
+    Annotated heatmap of pairwise cosine similarities between prototypes.
+
+    Uses seaborn ``heatmap`` with numeric annotations (upper-triangle masked
+    to avoid duplication).  Cosine similarity is scaled to percentage (×100).
+
+    Parameters
+    ----------
+    geometric_median_prototypes : torch.Tensor
+        Prototype matrix of shape ``(C, D)``.
+    id2label : dict
+        Class-index-to-label mapping.
+    title : str
+        Plot title.
+    filepath : str
+        Output file path.
+    """
     geo_medians = geometric_median_prototypes.cpu().numpy()
     sim_matrix = np.matmul(geo_medians, geo_medians.T)
     sim_matrix = sim_matrix * 100
@@ -78,6 +124,26 @@ def draw_prototype_alignment(
     title: str,
     filepath: str,
 ):
+    """
+    Cross-similarity heatmap between geometric-median and learnable weight prototypes.
+
+    Rows = geometric-median prototypes (data-driven), columns = weight vectors
+    (classifier).  High diagonal values indicate good alignment between the two
+    prototype sets.
+
+    Parameters
+    ----------
+    geometric_median_prototypes : torch.Tensor
+        Shape ``(C, D)``.
+    weight_prototypes : torch.Tensor
+        Learnable classifier weight vectors, shape ``(C, D)``.
+    id2label : dict
+        Class-index-to-label mapping.
+    title : str
+        Plot title.
+    filepath : str
+        Output file path.
+    """
     weight_protos = weight_prototypes.detach()
     sim_matrix = torch.matmul(geometric_median_prototypes.detach(), weight_protos.t())
     sim_matrix = (sim_matrix * 100).cpu().numpy()
@@ -114,6 +180,12 @@ def draw_prototype_alignment_no_num(
     title: str,
     filepath: str,
 ):
+    """
+    Cross-similarity heatmap (no annotations), same data as
+    :func:`draw_prototype_alignment` but using ``imshow``.
+
+    Faster rendering for many classes.
+    """
     geo = geometric_median_prototypes.detach()
     weight = weight_prototypes.detach()
 
@@ -155,6 +227,31 @@ def draw_umap(
     min_dist: float,
     random_state: int,
 ):
+    """
+    2-D UMAP projection of learned embeddings, coloured by predicted label.
+
+    Class 0 ("Non-vul") is always plotted in gray with low alpha; other classes
+    use the tab10 colour cycle.
+
+    Parameters
+    ----------
+    features : torch.Tensor
+        Embedding vectors, shape ``(N, D)``.
+    pred_label_idx : list of int
+        Predicted class index for each sample.
+    id2label : dict
+        Class-index-to-label mapping.
+    title : str
+        Plot title.
+    filepath : str
+        Output file path.
+    n_neighbors : int
+        UMAP ``n_neighbors`` parameter.
+    min_dist : float
+        UMAP ``min_dist`` parameter.
+    random_state : int
+        Seed for reproducible UMAP layout.
+    """
     reducer = umap.UMAP(
         n_neighbors=n_neighbors, min_dist=min_dist, random_state=random_state
     )
