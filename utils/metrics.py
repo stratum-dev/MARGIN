@@ -180,7 +180,13 @@ def compute_clustering_metrics(truth_label_idx, pred_label_idx, features=None):
     clustering_metrics["fmi"] = fowlkes_mallows_score(truth_label_idx, pred_label_idx)
     clustering_metrics["v_measure"] = v_measure_score(truth_label_idx, pred_label_idx)
     features_normalized = normalize(features, norm="l2", axis=1)
-    angular_sh = silhouette_score(features_normalized, pred_label_idx, metric="cosine")
+    n_unique_labels = len(set(pred_label_idx))
+    if n_unique_labels >= 2:
+        angular_sh = silhouette_score(
+            features_normalized, pred_label_idx, metric="cosine"
+        )
+    else:
+        angular_sh = float("nan")
     clustering_metrics["angular_silhouette_score"] = angular_sh
     return clustering_metrics
 

@@ -394,7 +394,7 @@ class Trainer:
                 log.print(f"Removed oldest checkpoint: {oldest}")
 
     def save_checkpoint_file(self, path):
-
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
