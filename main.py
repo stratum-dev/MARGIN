@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime
+import json
 import os
 from datasets import load_dataset
 from utils.trainer import Trainer, TrainerConfig
@@ -31,7 +32,7 @@ def parse_args():
         help="Pretrained Backbone (Default: microsoft/unixcoder-base)",
     )
 
-    # --- 超参数配置 ---
+    # --- Hyperparameter Configuration ---
     parser.add_argument(
         "--base_scale", type=int, default=20, help="Base scale (Default: 20)"
     )
@@ -63,8 +64,10 @@ def parse_args():
         help="Early Stop Patience (Default: 30)",
     )
 
-    # --- 运行环境配置 ---
-    parser.add_argument("--seed", type=int, default=42, help="随机种子 (默认：42)")
+    # --- Runtime Environment Configuration ---
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed (Default: 42)"
+    )
     parser.add_argument(
         "--device",
         type=str,
@@ -75,11 +78,11 @@ def parse_args():
         "--batch_size", type=int, default=16, help="batch size (default: 16)"
     )
 
-    # UMAP 相关参数
+    # UMAP related parameters
     parser.add_argument("--umap_n_neighbors", type=int, default=15)
     parser.add_argument("--umap_min_dist", type=float, default=0.1)
 
-    # 解析参数
+    # Parse arguments
     args = parser.parse_args()
     return args
 
@@ -90,6 +93,7 @@ def main():
 
     TIME_PREFIX = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     OUTPUT_DIR = f"./output/{args.dataset_subset}-{args.backbone_name.split('/')[1]}-{TIME_PREFIX}"
+    SETTINGS_OUTPUT_PATH = os.path.join(OUTPUT_DIR, "settings.json")
     log.set_log_file(os.path.join(OUTPUT_DIR, "train.log"))
 
     config = TrainerConfig(
@@ -104,7 +108,20 @@ def main():
         umap_n_neighbors=args.umap_n_neighbors,
         umap_min_dist=args.umap_min_dist,
         seed=args.seed,
+        backbone_name=args.backbone_name,
+        dataset_name=args.dataset_name,
+        dataset_subset=args.dataset_subset,
+        base_scale=args.base_scale,
+        alpha=args.confidence_alpha,
     )
+
+    # Persist all hyperparameters for reproducibility
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    settings = config.__dict__.copy()
+    settings["time_prefix"] = TIME_PREFIX
+    with open(SETTINGS_OUTPUT_PATH, "w") as f:
+        json.dump(settings, f, indent=2, default=str)
+    log.print(f"Settings saved to {SETTINGS_OUTPUT_PATH}")
 
     set_seed(config.seed)
     log.print(

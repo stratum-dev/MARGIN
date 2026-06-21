@@ -42,6 +42,11 @@ class TrainerConfig:
         umap_n_neighbors: int,
         umap_min_dist: float,
         seed=int,
+        backbone_name: str = "microsoft/unixcoder-base",
+        dataset_name: str = "codemetic/MARGIN",
+        dataset_subset: str = "bigvul",
+        base_scale: float = 20,
+        alpha: float = 0.95,
     ):
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -54,6 +59,11 @@ class TrainerConfig:
         self.umap_n_neighbors = umap_n_neighbors
         self.umap_min_dist = umap_min_dist
         self.seed = seed
+        self.backbone_name = backbone_name
+        self.dataset_name = dataset_name
+        self.dataset_subset = dataset_subset
+        self.base_scale = base_scale
+        self.alpha = alpha
 
 
 class Trainer:
@@ -322,10 +332,10 @@ class Trainer:
             val_global_f1 = val_metrics["classification_metrics"]["global_macro"]["f1"]
             log.print(f"Val Loss: {avg_val_loss:.4f}")
 
-            # 检查是否需要更新最佳模型
+            # Check if best model needs to be updated
             self.update_best_model(epoch, val_global_f1)
 
-            # 打印当前最优
+            # Print current best
             if self.best_model_state is not None:
                 best_epoch = self.best_model_state["epoch"]
                 best_global_f1 = self.best_model_state["val_global_f1"]
@@ -337,7 +347,7 @@ class Trainer:
                     f"🏆 Current Best: Epoch {epoch} | Global F1 {val_global_f1:.4f}"
                 )
 
-            # 早停判断
+            # Early stopping check
             if self.patience_counter >= self.config.early_stopping_patience:
                 log.print(f"Early stopping triggered at epoch {epoch}")
                 break
@@ -349,8 +359,7 @@ class Trainer:
         return self.model
 
     def init_checkpoint_queue(self):
-        max_checkpoints = self.config.max_checkpoints
-        self.checkpoint_queue = deque(maxlen=max_checkpoints)
+        self.checkpoint_queue = deque()
 
     def update_best_model(self, epoch, val_global_f1):
         if val_global_f1 > self.best_global_f1:
@@ -372,11 +381,13 @@ class Trainer:
             )
 
     def save_checkpoint_with_queue(self, epoch):
-        checkpoint_path = os.path.join(self.config.output_dir, f"epoch_{epoch}.pth")
+        checkpoint_path = os.path.join(
+            self.config.output_dir, "checkpoints", f"epoch_{epoch}.pth"
+        )
         self.save_checkpoint_file(checkpoint_path)
         self.checkpoint_queue.append(checkpoint_path)
 
-        while len(self.checkpoint_queue) > self.checkpoint_queue.maxlen:
+        while len(self.checkpoint_queue) > self.config.max_checkpoints:
             oldest = self.checkpoint_queue.popleft()
             if os.path.exists(oldest):
                 os.remove(oldest)
@@ -391,6 +402,8 @@ class Trainer:
             "patience_counter": self.patience_counter,
             "best_model_state": self.best_model_state,
             "config": self.config.__dict__,
+            "label2id": self.model.label2id,
+            "id2label": self.model.id2label,
         }
         torch.save(checkpoint, path)
         log.print(f"Checkpoint saved: {path}")

@@ -2,5 +2,6 @@ outputs
 output
 baselines
 *.temp.py
+*.example.*
 
 __pycache__

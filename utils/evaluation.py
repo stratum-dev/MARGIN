@@ -30,7 +30,7 @@ def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, devic
             attention_mask = batch["attention_mask"].to(device)
             label_idxs = batch["label_idx"].to(device)
 
-            # ✅ 一次 forward
+            # Single forward pass
             with torch.autocast(device):
                 cos_theta, features = model(
                     input_ids, attention_mask, return_features=True

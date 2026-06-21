@@ -192,11 +192,11 @@ def compute_etf_metrics(prototypes: torch.Tensor):
     # Gram matrix
     G = P @ P.T
 
-    # 1. ETF 理想 Gram
+    # 1. ETF ideal Gram
     target = torch.full((K, K), -1 / (K - 1), device=P.device)
     target.fill_diagonal_(1)
     etf_error = torch.norm(G - target, p="fro").item()
-    etf_error_norm = etf_error / K  # 归一化
+    etf_error_norm = etf_error / K  # Normalized
 
     # 2. Off-diagonal cosines
     mask = ~torch.eye(K, dtype=bool, device=P.device)

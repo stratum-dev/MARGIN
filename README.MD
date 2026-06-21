@@ -2,6 +2,93 @@
 
 **M**argin-**A**ware **R**egularized **G**eometry for **I**mbalance Vulnerability Detectio**N**
 
+Official implementation of the paper. This artifact repository is for reproduction and it offers the training, evaluation pipelines.
+
+## Requirements
+
+- **GPU Memory**: ≥ 24 GB
+- **CUDA**: 12.4 runtime (driver ≥ 525 may also work via backward compatibility)
+- **CPU**: x86-64, ≥ 4 cores
+- **RAM**: ≥ 8 GB
+- **Disk Space**: ≥ 2 GB for the dataset, ≥ 5 GB for backbone models
+- **OS**: Linux (tested on Ubuntu 22.04 / 24.04)
+
+## Installation
+
+### 1. Create the conda environment
+
+```bash
+conda env create -f environment.yml
+conda activate margin
+```
+
+### 2. Install PyTorch
+
+(CUDA 12.4 wheels — hosted on pytorch.org, not PyPI)
+
+```bash
+pip install torch==2.6.0+cu124          \
+            torchvision==0.21.0+cu124   \
+            torchaudio==2.6.0+cu124     \
+            --index-url https://download.pytorch.org/whl/cu124
+```
+
+### 3. Install the HuggingFace CLI
+
+```bash
+pip install -U "huggingface_hub"
+```
+
+## Download
+
+The dataset and backbone models are hosted on Huggingface. You can download the dataset and backbone models by CLI tools manually.
+
+### Dataset
+
+```bash
+hf download codemetic/MARGIN --repo-type=dataset
+```
+
+### Backbone Models
+
+```bash
+hf download Salesforce/codet5-base
+```
+
+> **For users in mainland China:** set the HuggingFace mirror endpoint before any `hf download` command:
+> ```bash
+> export HF_ENDPOINT=https://hf-mirror.com
+> ```
+
+## Training
+
+Run `python main.py --help` to see all available parameters. The relevant hyperparameters are given in the paper.
+
+Example training command:
+
+```bash
+python  main.py                                           \
+        --dataset_subset          bigvul                  \
+        --backbone_name           Salesforce/codet5-base  \
+        --max_epochs              200                     \
+        --max_checkpoints         3                       \
+        --early_stopping_patience 30                      \
+        --base_scale              20                      \
+        --device                  cuda:0                  \
+        --seed                    42                      \
+        --batch_size              16
+```
+
+**NOTE:** Training and evaluation results may differ slightly from the original paper due to variations in platform architecture, hardware, and software versions.
+
+## Evaluation
+
+```bash
+python eval.py
+```
+
+Interactive CLI — use `↑` / `↓` to select a training run and checkpoint, then configure batch size, seed, and device before evaluation starts.
+
 ## Citation
 
 ```bibtex
@@ -16,40 +103,8 @@
 }
 ```
 
-## Requirement
-
-You need at least **24GB** GPU Memory to launch this project under **CUDA 12.4**.
-
-## Getting Start
-
-Ensure you have installed the huggingface-cli on your environment and download the dataset.
-
-```bash
-hf download codemetic/MARGIN --repo-type=dataset
-```
-
-Start training with such command. Here is the example.
-
-```bash
-python main.py                               \
---dataset_subset bigvul                      \
---backbone_name Salesforce/codet5-base       \
---max_epochs 200                             \
---max_checkpoints 3                          \
---early_stop_patience 30                     \
---base_scale 20                              \
---device cuda:0                              \
---batch_size 16 
-```
-
-Also, you can lookup all parameter descriptions with
-
-```bash
-python main.py --help
-```
-
 ## Licence
 
-The source code and programming implementation is under the licence of [Creative Commons Attribution 4.0 International (CC-BY-4.0)](https://interoperable-europe.ec.europa.eu/licence/creative-commons-attribution-40-international-cc-40)
+The source code and programming implementation in this repository are licensed under the **CC BY 4.0 License**.
 
-
+The datasets referenced or used by this project are **NOT** included under this license. All such datasets remain the intellectual property of their respective owners and are distributed under their own licenses, terms of use, and access conditions. Users are responsible for complying with the applicable licensing requirements of the original dataset providers when downloading, using, or redistributing these datasets.

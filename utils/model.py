@@ -152,7 +152,7 @@ class MARGINLossHead(nn.Module):
     # def forward(self, cos_theta, label_idxs):
     #     B, C = cos_theta.shape
 
-    #     # 每个样本对应的 margin
+    #     # Margin for each sample
     #     margins = self.margins[label_idxs]  # [B]
 
     #     cos_theta = torch.clamp(cos_theta, -1 + 1e-7, 1 - 1e-7)
@@ -163,7 +163,7 @@ class MARGINLossHead(nn.Module):
     #     # CosFace: cos(theta) - m
     #     cos_theta_minus_m = cos_theta - margins.unsqueeze(1)
 
-    #     # 只对 target class 减 margin
+    #     # Only subtract margin for target class
     #     output = cos_theta * (1 - one_hot) + cos_theta_minus_m * one_hot
 
     #     # scale

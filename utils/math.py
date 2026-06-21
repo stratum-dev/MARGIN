@@ -78,7 +78,7 @@ def compute_margin(
     theta_fallback = theta_fallback.expand_as(theta_vmf)
 
     # =========================
-    # 6. final margin（合法写法）
+    # 6. final margin
     # =========================
     margins = torch.maximum(
         torch.maximum(theta_exceed, theta_fallback), torch.zeros_like(theta_vmf)
@@ -110,22 +110,22 @@ def compute_geometric_median(
     eps: float = 1e-6,
 ) -> torch.Tensor:
     """
-    球面上的几何中位数（Weiszfeld + 投影）
+    Geometric median on the sphere (Weiszfeld + projection).
 
-    X: [N, D]，已 L2 normalize
+    X: [N, D], already L2-normalized.
     """
 
-    # ✅ 初始化也要在球面上
+    # Initialize on the sphere
     y = F.normalize(X.mean(dim=0), dim=0)
     for _ in range(max_iter):
         dist = torch.norm(X - y, dim=1)
-        # ✅ 防止除零
+        # Prevent division by zero
         dist = torch.clamp(dist, min=eps)
         inv_dist = 1.0 / dist
         y_new = (X * inv_dist[:, None]).sum(dim=0) / inv_dist.sum()
-        # ✅ 投影回单位球（关键）
-        y_new = F.normalize(y_new, dim=0)  # 这里的 dim 是不是写错方向了
-        # ✅ 收敛判断
+        # Project back to unit sphere (critical)
+        y_new = F.normalize(y_new, dim=0)  # Is the dim direction correct here?
+        # Convergence check
         if torch.norm(y - y_new) < eps:
             break
         y = y_new
