@@ -63,11 +63,6 @@ hf download codemetic/MARGIN --repo-type=dataset
 hf download Salesforce/codet5-base
 ```
 
-> **Para usuarios en China continental:** configure el endpoint espejo de HuggingFace antes de cualquier comando `hf download`:
-> ```bash
-> export HF_ENDPOINT=https://hf-mirror.com
-> ```
-
 ## Entrenamiento
 
 Ejecute `python main.py --help` para ver todos los parámetros disponibles. Los hiperparámetros relevantes se proporcionan en el artículo.

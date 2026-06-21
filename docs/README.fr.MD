@@ -63,11 +63,6 @@ hf download codemetic/MARGIN --repo-type=dataset
 hf download Salesforce/codet5-base
 ```
 
-> **Pour les utilisateurs en Chine continentale :** configurez le miroir HuggingFace avant toute commande `hf download` :
-> ```bash
-> export HF_ENDPOINT=https://hf-mirror.com
-> ```
-
 ## Entraînement
 
 Exécutez `python main.py --help` pour voir tous les paramètres disponibles. Les hyperparamètres pertinents sont donnés dans l'article.

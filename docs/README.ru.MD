@@ -63,11 +63,6 @@ hf download codemetic/MARGIN --repo-type=dataset
 hf download Salesforce/codet5-base
 ```
 
-> **Для пользователей из материкового Китая:** настройте зеркало HuggingFace перед выполнением любой команды `hf download`:
-> ```bash
-> export HF_ENDPOINT=https://hf-mirror.com
-> ```
-
 ## Обучение
 
 Выполните `python main.py --help`, чтобы увидеть все доступные параметры. Соответствующие гиперпараметры приведены в статье.

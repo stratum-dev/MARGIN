@@ -65,11 +65,6 @@ hf download codemetic/MARGIN --repo-type=dataset
 hf download Salesforce/codet5-base
 ```
 
-> **للمستخدمين في الصين القارية:** قم بتعيين نقطة نهاية مرآة HuggingFace قبل أي أمر `hf download`:
-> ```bash
-> export HF_ENDPOINT=https://hf-mirror.com
-> ```
-
 ## التدريب
 
 قم بتشغيل `python main.py --help` لعرض جميع المعلمات المتاحة. المعاملات الفائقة ذات الصلة مذكورة في الورقة.
