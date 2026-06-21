@@ -1,4 +1,4 @@
-![](./assets/logo.png)
+![](../assets/logo.png)
 
 [English](../README.MD) | [中文](./README.zh.MD) | [Français](./README.fr.MD) | [Español](./README.es.MD) | [Русский](./README.ru.MD) | [العربية](./README.ar.MD)
 
@@ -8,7 +8,7 @@ Implémentation officielle de l'article. Ce dépôt fournit les pipelines d'entr
 
 ## Résumé
 
-![](./assets/banner.png)
+![](../assets/banner.png)
 
 La détection de vulnérabilités logicielles est essentielle pour garantir la sécurité et la fiabilité des logiciels. Malgré les progrès récents de l'apprentissage profond, les jeux de données de vulnérabilités du monde réel souffrent de deux défis majeurs : le déséquilibre de fréquence et le déséquilibre de difficulté. Nous réinterprétons ces défis du point de vue de la géométrie de l'espace de représentation, en observant que de tels déséquilibres induisent des distorsions géométriques dans l'espace de représentation hypersphérique. Pour résoudre ce problème, nous proposons MARGIN, un cadre basé sur l'apprentissage métrique qui apprend des représentations discriminatives des vulnérabilités via un apprentissage métrique à marge adaptative et une modélisation de prototypes hypersphériques. MARGIN ajuste dynamiquement la régularisation géométrique en fonction de la structure de distribution estimée par la concentration de von Mises-Fisher, alignant la masse de probabilité des distributions de représentations avec leurs cellules de Voronoi correspondantes, réduisant ainsi la distorsion géométrique et produisant des frontières de décision plus stables. Des expériences approfondies sur des jeux de données publics de vulnérabilités montrent que MARGIN surpasse systématiquement les références solides, réalisant des améliorations notables en classification et en détection, en particulier sur les jeux de données déséquilibrés et difficiles. Une analyse plus poussée démontre que MARGIN produit des géométries de représentations plus structurées, améliorant la robustesse, l'interprétabilité et la généralisation.
 

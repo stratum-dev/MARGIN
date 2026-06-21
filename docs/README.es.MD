@@ -1,4 +1,4 @@
-![](./assets/logo.png)
+![](../assets/logo.png)
 
 [English](../README.MD) | [中文](./README.zh.MD) | [Français](./README.fr.MD) | [Español](./README.es.MD) | [Русский](./README.ru.MD) | [العربية](./README.ar.MD)
 
@@ -8,7 +8,7 @@ Implementación oficial del artículo. Este repositorio proporciona los pipeline
 
 ## Resumen
 
-![](./assets/banner.png)
+![](../assets/banner.png)
 
 La detección de vulnerabilidades de software es fundamental para garantizar la seguridad y fiabilidad del software. A pesar de los avances recientes en aprendizaje profundo, los conjuntos de datos de vulnerabilidades del mundo real sufren dos graves desafíos: desequilibrio de frecuencia y desequilibrio de dificultad. Reinterpretamos estos desafíos desde una perspectiva de geometría de representación, observando que dichos desequilibrios inducen distorsiones geométricas en el espacio de representación hiperesférico. Para abordar este problema, proponemos MARGIN, un marco basado en aprendizaje métrico que aprende representaciones discriminativas de vulnerabilidades mediante aprendizaje métrico con margen adaptativo y modelado de prototipos hiperesféricos. MARGIN ajusta dinámicamente la regularización geométrica según la estructura de distribución estimada por la concentración de von Mises-Fisher, alineando la masa de probabilidad de las distribuciones de representación con sus correspondientes celdas de Voronoi, reduciendo así la distorsión geométrica y produciendo fronteras de decisión más estables. Experimentos exhaustivos en conjuntos de datos públicos de vulnerabilidades muestran que MARGIN supera consistentemente a los modelos de referencia sólidos, logrando mejoras notables en clasificación y detección, especialmente en conjuntos de datos desafiantes y desequilibrados. Análisis adicionales demuestran que MARGIN produce geometrías de representación más estructuradas, mejorando la robustez, interpretabilidad y generalización.
 
