@@ -78,7 +78,7 @@ def compute_scale(kappas: torch.Tensor, base_scale: float):
 
     Classes with higher kappa (tighter clusters) receive smaller scale factors,
     and vice versa, via a softmax reweighting that is reversed so that the
-    hardest class gets the largest scale boost.
+    dispersed class gets the largest scale boost.
 
     Parameters
     ----------
@@ -94,8 +94,7 @@ def compute_scale(kappas: torch.Tensor, base_scale: float):
     """
     u = torch.log(kappas)
     C = kappas.shape[0]
-    r = torch.softmax(u / C, dim=0) * C
-    r = torch.flip(r, dims=[0])  # reverse so low-kappa (hard) classes get larger scales
+    r = torch.softmax( - u / C, dim=0) * C
     new_scales = base_scale * r
     return new_scales
 

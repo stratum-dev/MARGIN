@@ -3,5 +3,5 @@ output
 baselines
 *.temp.py
 *.example.*
-
+workspace
 __pycache__
