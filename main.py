@@ -37,8 +37,8 @@ def parse_args():
     parser.add_argument(
         "--backbone_name",
         type=str,
-        default="microsoft/unixcoder-base",
-        help="Pretrained Backbone (Default: microsoft/unixcoder-base)",
+        default="Salesforce/codet5-base",
+        help="Pretrained Backbone (Default: Salesforce/codet5-base)",
     )
 
     # --- Hyperparameter Configuration ---
