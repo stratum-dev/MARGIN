@@ -6,7 +6,7 @@
 
 Official implementation of the paper. This artifact repository is for reproduction and it offers the training, evaluation pipelines.
 
-This is also the extension and improvement version of prior work **AEGIS** (https://anonymous.4open.science/r/AEGIS-FECD/), which unifies the geometric perspective for embeddings distribution for imbalances.
+This is also the public and parallel version of prior work **AEGIS** (https://anonymous.4open.science/r/AEGIS-FECD/), which unifies the geometric perspective for embeddings distribution for imbalances.
 
 ## Abstract
 
