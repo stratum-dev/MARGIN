@@ -144,7 +144,7 @@ def compute_margin(
     # ==================================================================
     q = chi2.ppf(alpha, df=dim - 1)
     kappa_eff = torch.clamp(kappas, min=1.0)
-    theta_vmf = torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
+    theta_vmf = 0.5 * torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
 
     # ==================================================================
     # 2. ETF Voronoi cone: half the ideal ETF angle
