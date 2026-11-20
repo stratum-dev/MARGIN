@@ -108,15 +108,19 @@ def compute_margin(
     """
     Compute adaptive per-class angular margins.
 
-    Balances two forces:
+    Both cone angles are **full apex angles**, i.e. the angle between two
+    opposite generatrices, so they are directly comparable:
 
-    1. **vMF uncertainty cone** — derived from a chi-squared confidence region
-       at level *alpha*.  Larger kappa (tighter cluster) → smaller cone.
-    2. **ETF Voronoi cone** — half the ideal ETF angle, representing the
-       minimal separation needed for a simplex ETF configuration.
+    1. **vMF uncertainty cone** — ``theta_learned = 2*sqrt(q/kappa)`` with
+       ``q = chi2.ppf(alpha, d-1)``.  Larger kappa (tighter cluster) gives a
+       smaller cone.
+    2. **ETF Voronoi cone** — ``theta_ideal = arccos(-1/(C-1))``, the full
+       apex angle of the ideal simplex-ETF cell.
 
-    The final margin is ``max(excess_over_voronoi, fallback_vs_minimum, 0)``,
-    ensuring the margin is never negative.
+    Because the cone is symmetric about its axis, the angular excess is split
+    equally between the two sides, so each branch is halved.  The final margin
+    is ``max(excess_over_voronoi/2, fallback_vs_minimum/2, 0)``, ensuring the
+    margin is never negative.
 
     Parameters
     ----------
@@ -140,16 +144,18 @@ def compute_margin(
     # return torch.full((C,), 0, dtype=torch.float32)
 
     # ==================================================================
-    # 1. vMF uncertainty cone: radius of (1-alpha) confidence region
+    # 1. vMF uncertainty cone: FULL apex angle of the alpha-confidence cap
+    #    theta_learned = 2 * sqrt(chi2_alpha(d-1) / kappa)
     # ==================================================================
     q = chi2.ppf(alpha, df=dim - 1)
     kappa_eff = torch.clamp(kappas, min=1.0)
-    theta_learned = 0.5 * 2 * torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
+    theta_learned = 2.0 * torch.sqrt(torch.tensor(q, device=device) / kappa_eff)  # [C]
 
     # ==================================================================
-    # 2. ETF Voronoi cone: half the ideal ETF angle
+    # 2. ETF Voronoi cone: FULL ideal apex angle
+    #    theta_ideal = arccos(-1 / (C - 1))
     # ==================================================================
-    theta_ideal = 0.5 * 2 * math.acos(-1 / (C - 1))
+    theta_ideal = math.acos(-1 / (C - 1))
 
     # ==================================================================
     # 3. Global minimum cone (tightest uncertainty across all classes)
@@ -157,14 +163,16 @@ def compute_margin(
     theta_minimum_angle = torch.min(theta_learned)
 
     # ==================================================================
-    # 4. Excess: how much the uncertainty cone exceeds the ETF ideal
+    # 4. Excess: how much the uncertainty cone exceeds the ETF ideal.
+    #    Both angles are full apex angles, and the cone is symmetric about
+    #    its axis, so the correction applied on each side is half the excess.
     # ==================================================================
-    theta_exceed = theta_learned - theta_ideal
+    theta_exceed = 0.5 * (theta_learned - theta_ideal)
 
     # ==================================================================
-    # 5. Fallback: excess over the global minimum uncertainty
+    # 5. Fallback: excess over the global minimum uncertainty (also halved)
     # ==================================================================
-    theta_fallback = theta_learned - theta_minimum_angle
+    theta_fallback = 0.5 * (theta_learned - theta_minimum_angle)
     theta_fallback = theta_fallback.expand_as(theta_learned)
 
     # ==================================================================

@@ -255,8 +255,12 @@ class MARGINLossHead(nn.Module):
 
         For each sample *i* with target class *y_i*:
 
-            logit_j = s_j · cos(θ_j)           for j ≠ y_i
-            logit_yi = s_yi · cos(θ_yi + m_yi)  for the target class
+            logit_j  = s_j · cos(θ_j)            for j ≠ y_i
+            logit_yi = s_yi · phi(cos(θ_yi))     for the target class
+
+        where ``phi`` is the piecewise monotonicity-preserving transform that
+        equals ``cos(θ + m)`` while ``θ + m <= π`` and is frozen at ``-1``
+        beyond that boundary. Only the ground-truth logit is modified.
 
         Parameters
         ----------
@@ -273,20 +277,34 @@ class MARGINLossHead(nn.Module):
         B, C = cos_thetas.shape
         device = cos_thetas.device
 
-        # Clamp for numerical stability
-        cos_thetas = torch.clamp(cos_thetas, -1 + 1e-7, 1 - 1e-7)
+        # Clamp the cosine to its valid interval before any radical is taken.
+        # An inner product of two unit vectors can fall marginally outside
+        # [-1, 1] under floating-point rounding.
+        cos_thetas = torch.clamp(cos_thetas, -1.0, 1.0)
 
         # Fetch per-sample margin
         margins_batch = self.margins.to(device)[label_idxs].to(cos_thetas.dtype)
         cos_m = torch.cos(margins_batch)
         sin_m = torch.sin(margins_batch)
 
-        # Extract target-class cosine and compute sin(θ)
+        # Extract target-class cosine and compute sin(θ) >= 0 for θ in [0, π].
+        # The max(1 - x^2, 0) guard keeps the radicand non-negative.
         target_cos = cos_thetas[torch.arange(B, device=device), label_idxs]
-        target_sin = torch.sqrt(torch.clamp(1.0 - target_cos**2, min=1e-7))
+        target_sin = torch.sqrt(torch.clamp(1.0 - target_cos**2, min=0.0))
 
-        # cos(θ + m) = cos(θ)cos(m) - sin(θ)sin(m)
-        target_cos_margin = target_cos * cos_m - target_sin * sin_m
+        # Piecewise monotonicity-preserving margin transform phi(x):
+        #   phi(x) = x*cos(m) - sqrt(max(1-x^2,0))*sin(m)   for x > -cos(m)
+        #   phi(x) = -1                                     for x <= -cos(m)
+        # The first branch is cos(θ + m) and is valid while θ + m <= π. Beyond
+        # that boundary cos(θ + m) would start increasing with θ, so the logit
+        # is frozen at its global minimum -1. Both branches meet at x = -cos(m)
+        # with value -1 and zero derivative, so phi is C^1 there.
+        arcface_branch = target_cos * cos_m - target_sin * sin_m
+        target_cos_margin = torch.where(
+            target_cos > -cos_m,
+            arcface_branch,
+            torch.full_like(arcface_branch, -1.0),
+        )
         target_cos_margin = target_cos_margin.to(cos_thetas.dtype)
 
         # Replace target-class logit with margin-adjusted version
