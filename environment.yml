@@ -1,0 +1,62 @@
+name: margin
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+
+  # ---- CUDA 12.4 toolkit (keep in sync with PyTorch wheels) ----
+  - cuda-version=12.4
+  - cuda-cudart=12.4.127
+  - cuda-libraries=12.4.1
+  - cuda-runtime=12.4.1
+  - cuda-nvrtc=12.4.127
+  - cuda-nvtx=12.4.127
+  - cuda-cupti=12.4.127
+  - libcublas=12.4.5.8
+  - libcufft=11.2.1.3
+  - libcurand=10.3.5.147
+  - libcusolver=11.6.1.9
+  - libcusparse=12.3.1.170
+  - nccl=2.21.5.1
+
+  # ---- PyTorch (conda-managed CUDA compatibility layer) ----
+  - pytorch-cuda=12.4
+  - pytorch-mutex=1.0=cuda
+
+  # ---- core data-science & viz ----
+  - numpy=1.26
+  - scipy
+  - scikit-learn
+  - pandas
+  - matplotlib
+  - seaborn
+  - tqdm
+  - pyyaml
+  - pillow
+
+  # ---- dev ----
+  - git
+  - black
+  - git-lfs
+
+  - pip:
+      - transformers==4.57.1
+      - datasets==4.3.0
+      - tokenizers==0.22.1
+      - gpustat=1.1.1
+      - accelerate==1.11.0
+      - evaluate==0.4.6
+      - sentencepiece==0.2.1
+      - umap-learn==0.5.9.post2
+      - pytorch-metric-learning==2.9.0
+      - InquirerPy==0.3.4
+      - safetensors==0.5.3
+      - huggingface-hub==0.35.3
+      - dill==0.4.0
+      - multiprocess==0.70.16
+      - pyarrow==24.0.0
+      - fsspec==2025.9.0
+      - aiohttp==3.14.1

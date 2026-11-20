@@ -1,0 +1,124 @@
+"""
+Model evaluation loop.
+
+Runs a single pass over a :class:`DataLoader`, collects predictions and
+features, and computes classification / clustering / ETF / statistics metrics.
+"""
+
+import torch
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+from utils.metrics import (
+    compute_classification_metrics,
+    compute_clustering_metrics,
+    compute_etf_metrics,
+    compute_statistics_metrics,
+)
+import torch.nn.functional as F
+from utils.model import MARGINModel
+
+
+def evaluate_model(model: MARGINModel, dataloader: DataLoader, title: str, device):
+    """
+    Evaluate *model* on *dataloader* and return comprehensive metrics.
+
+    Performs a full forward pass (inference only — no gradients), computes the
+    loss, and aggregates predictions, features, and raw labels across all
+    batches.  Then delegates to the metric-computation functions.
+
+    Parameters
+    ----------
+    model : MARGINModel
+        The model to evaluate (will be set to ``eval()`` mode).
+    dataloader : DataLoader
+        DataLoader yielding batches with keys ``input_ids``, ``attention_mask``,
+        ``label_idx``, ``raw_label``.
+    title : str
+        Description shown in the progress bar.
+    device : str or torch.device
+        Device to run evaluation on.
+
+    Returns
+    -------
+    tuple
+        ``(metrics_dict, all_features, all_truth_labels, all_pred_labels,
+        all_raw_labels, avg_loss)``
+    """
+    model.eval()
+
+    all_pred_label_idx = []
+    all_truth_label_idx = []
+    all_features = []
+    all_raw_labels = []
+
+    total_loss = 0.0
+    num_batches = 0
+
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc=title, leave=False)
+
+        for batch in pbar:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            label_idxs = batch["label_idx"].to(device)
+
+            # Forward pass: cosine logits + [CLS] features
+            with torch.autocast(device):
+                cos_theta, features = model(
+                    input_ids, attention_mask, return_features=True
+                )
+
+            # L2-normalize for cosine-space nearest-prototype classification
+            features = F.normalize(features, dim=1)
+            prototypes = F.normalize(model.current_geometric_median_prototypes, dim=1)
+
+            # Prediction = nearest geometric-median prototype
+            logits = torch.matmul(features, prototypes.t())
+            preds = torch.argmax(logits, dim=1)
+
+            # Loss computed via the model's own loss head (ArcFace-style)
+            loss = model.loss_head(cos_theta, label_idxs)
+
+            total_loss += loss.item()
+            num_batches += 1
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+            all_pred_label_idx.extend(preds.cpu().numpy())
+            all_truth_label_idx.extend(label_idxs.cpu().numpy())
+            all_features.append(features.cpu())
+            all_raw_labels.extend(batch["raw_label"])
+
+    avg_loss = total_loss / num_batches
+    all_features = torch.cat(all_features, dim=0)
+
+    classification_metrics = compute_classification_metrics(
+        all_truth_label_idx, all_pred_label_idx, model.id2label
+    )
+    clustering_metrics = compute_clustering_metrics(
+        all_truth_label_idx, all_pred_label_idx, all_features
+    )
+    etf_metrics = compute_etf_metrics(model.current_geometric_median_prototypes.cpu())
+
+    statistics_metrics = compute_statistics_metrics(
+        model.loss_head.kappas,
+        model.loss_head.margins,
+        model.loss_head.scales,
+        model.id2label,
+    )
+
+    metrics = {
+        "val_loss": avg_loss,
+        "classification_metrics": classification_metrics,
+        "clustering_metrics": clustering_metrics,
+        "etf_metrics": etf_metrics,
+        "statistics_metrics": statistics_metrics,
+    }
+
+    return (
+        metrics,
+        all_features,
+        all_truth_label_idx,
+        all_pred_label_idx,
+        all_raw_labels,
+        avg_loss,
+    )
